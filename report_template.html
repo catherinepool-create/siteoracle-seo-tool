@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{TITLE}}</title>
+    <style>
+        /* ── Reset & Base ────────────────────────────────── */
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            background: #f1f5f9;
+            color: #1e293b;
+            line-height: 1.6;
+        }
+
+        /* ── Layout ──────────────────────────────────────── */
+        .container { max-width: 960px; margin: 0 auto; padding: 24px; }
+        @media (max-width: 640px) { .container { padding: 12px; } }
+
+        /* ── Header ──────────────────────────────────────── */
+        .header {
+            background: linear-gradient(135deg, #0f172a 0%, #1e40af 50%, #3b82f6 100%);
+            color: white;
+            padding: 40px 32px;
+            border-radius: 16px;
+            margin-bottom: 24px;
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 300px;
+            height: 300px;
+            background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%);
+            border-radius: 50%;
+        }
+        .header h1 { font-size: 32px; font-weight: 700; margin-bottom: 4px; letter-spacing: -0.5px; }
+        .header .url { font-size: 16px; opacity: 0.85; word-break: break-all; }
+        .header .meta { font-size: 14px; opacity: 0.65; margin-top: 8px; }
+        .header .badge-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(255,255,255,0.15);
+            color: white;
+        }
+
+        /* ── Score Card ──────────────────────────────────── */
+        .score-card {
+            background: white;
+            border-radius: 16px;
+            padding: 28px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+        }
+        .score-row {
+            display: flex;
+            align-items: center;
+            gap: 32px;
+            flex-wrap: wrap;
+        }
+        .score-main {
+            text-align: center;
+            flex-shrink: 0;
+        }
+        .score-number {
+            font-size: 56px;
+            font-weight: 800;
+            line-height: 1;
+            letter-spacing: -2px;
+        }
+        .score-label {
+            font-size: 13px;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 4px;
+        }
+        .score-breakdown {
+            display: flex;
+            gap: 24px;
+            flex-wrap: wrap;
+            flex: 1;
+        }
+        .stat {
+            text-align: center;
+            min-width: 60px;
+        }
+        .stat-value { font-size: 22px; font-weight: 700; }
+        .stat-label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+        .stat-critical { color: #ef4444; }
+        .stat-warning { color: #f59e0b; }
+        .stat-info { color: #3b82f6; }
+        .stat-pass { color: #22c55e; }
+
+        /* ── Dimension Score Cards (AEO/GEO/GBP) ──────────── */
+        .dimension-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .dimension-card {
+            background: #f8fafc;
+            border-radius: 10px;
+            padding: 16px;
+            border: 1px solid #e2e8f0;
+        }
+        .dimension-card .dim-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            margin-bottom: 4px;
+        }
+        .dimension-card .dim-score {
+            font-size: 28px;
+            font-weight: 700;
+        }
+        .dimension-card .dim-issues {
+            font-size: 12px;
+            color: #ef4444;
+            margin-top: 4px;
+        }
+        .dimension-card .dim-passes {
+            font-size: 12px;
+            color: #22c55e;
+            margin-top: 2px;
+        }
+
+        /* ── Sections ─────────────────────────────────────── */
+        .section {
+            background: white;
+            border-radius: 16px;
+            padding: 28px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+        }
+        .section h2 {
+            font-size: 20px;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .section h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #334155;
+            margin: 20px 0 12px;
+        }
+
+        /* ── Issue Items ──────────────────────────────────── */
+        .issue-item {
+            border-left: 4px solid #e2e8f0;
+            padding: 14px 16px;
+            margin-bottom: 8px;
+            background: #f8fafc;
+            border-radius: 0 8px 8px 0;
+            transition: background 0.15s;
+        }
+        .issue-item:hover { background: #f1f5f9; }
+        .issue-item.critical { border-left-color: #ef4444; }
+        .issue-item.warning { border-left-color: #f59e0b; }
+        .issue-item.info { border-left-color: #3b82f6; }
+        .issue-item .issue-severity {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .issue-item .issue-check {
+            font-weight: 600;
+            color: #1e293b;
+            display: block;
+            margin-top: 2px;
+        }
+        .issue-item .issue-detail {
+            font-size: 14px;
+            color: #64748b;
+            margin-top: 4px;
+        }
+
+        /* ── Passes ───────────────────────────────────────── */
+        .pass-list { list-style: none; }
+        .pass-list li {
+            padding: 8px 12px;
+            margin-bottom: 4px;
+            background: #f0fdf4;
+            border-radius: 6px;
+            color: #166534;
+            font-size: 14px;
+        }
+        .pass-list li::before { content: '✅ '; }
+
+        /* ── AI Analysis ──────────────────────────────────── */
+        .ai-content { font-size: 15px; line-height: 1.8; }
+        .ai-content h1, .ai-content h2, .ai-content h3, .ai-content h4 {
+            color: #0f172a;
+            margin-top: 24px;
+            margin-bottom: 8px;
+        }
+        .ai-content p { margin-bottom: 12px; }
+        .ai-content ul, .ai-content ol { margin: 8px 0 12px 24px; }
+        .ai-content li { margin-bottom: 4px; }
+        .ai-content strong { color: #1e293b; }
+        .ai-content hr { margin: 20px 0; border: none; border-top: 1px solid #e2e8f0; }
+
+        /* ── Navigation Tabs ──────────────────────────────── */
+        .tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 24px;
+            background: #e2e8f0;
+            padding: 4px;
+            border-radius: 12px;
+            overflow-x: auto;
+        }
+        .tab {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #64748b;
+            cursor: default;
+            white-space: nowrap;
+            transition: all 0.15s;
+        }
+        .tab.active {
+            background: white;
+            color: #0f172a;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+        .tab.inactive {
+            cursor: pointer;
+        }
+        .tab.inactive:hover { color: #1e293b; }
+
+        /* ── Report Actions ───────────────────────────────── */
+        .actions {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 20px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: all 0.15s;
+            background: white;
+            color: #1e293b;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            text-decoration: none;
+        }
+        .btn:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); transform: translateY(-1px); }
+        .btn-primary { background: #1e40af; color: white; }
+        .btn-primary:hover { background: #1e3a8a; }
+        .btn-outline { border: 1px solid #e2e8f0; }
+
+        /* ── Footer ───────────────────────────────────────── */
+        .footer {
+            text-align: center;
+            padding: 24px;
+            color: #94a3b8;
+            font-size: 13px;
+        }
+        .footer a { color: #3b82f6; text-decoration: none; }
+
+        /* ── Progress Ring ────────────────────────────────── */
+        .ring-container {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        .ring-container svg { transform: rotate(-90deg); }
+        .ring-bg { fill: none; stroke: #e2e8f0; stroke-width: 8; }
+        .ring-fg { fill: none; stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 0.5s; }
+        .ring-text {
+            position: absolute;
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        /* ── Watermark ────────────────────────────────────── */
+        .watermark {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            font-size: 12px;
+            color: #cbd5e1;
+            pointer-events: none;
+            user-select: none;
+            z-index: 999;
+        }
+    </style>
+</head>
+<body>
+
+<div class="watermark">SiteOracle</div>
+
+<div class="container">
+
+    <!-- ════ Header ════ -->
+    <div class="header">
+        <h1>🔍 SiteOracle Report</h1>
+        <p class="url">{{URL}}</p>
+        <p class="meta">{{DATE}} · {{PAGES}} pages analyzed · {{DEPTH}} checks run</p>
+        <div class="badge-row">
+            <span class="badge">📊 Technical SEO</span>
+            {{AEO_BADGE}}
+            {{GEO_BADGE}}
+            {{GBP_BADGE}}
+        </div>
+    </div>
+
+    <!-- ════ Actions ════ -->
+    <div class="actions">
+        <button class="btn btn-primary" onclick="window.print()">🖨️ Print / Save PDF</button>
+        <a class="btn btn-outline" href="#seo">⬇️ Jump to Issues</a>
+        <a class="btn btn-outline" href="#ai">🤖 AI Analysis</a>
+    </div>
+
+    <!-- ════ Score Card ════ -->
+    <div class="score-card" id="score">
+        <div class="score-row">
+            <div class="score-main">
+                <div class="ring-container">
+                    <svg width="100" height="100">
+                        <circle class="ring-bg" cx="50" cy="50" r="40"/>
+                        <circle class="ring-fg" cx="50" cy="50" r="40"
+                                stroke="{{SCORE_COLOR}}"
+                                stroke-dasharray="251.2"
+                                stroke-dashoffset="{{SCORE_OFFSET}}"/>
+                    </svg>
+                    <span class="ring-text" style="color: {{SCORE_COLOR}}">{{SCORE}}</span>
+                </div>
+                <div class="score-label">Technical SEO Score</div>
+            </div>
+            <div class="score-breakdown">
+                <div class="stat">
+                    <div class="stat-value stat-critical">{{CRITICAL_COUNT}}</div>
+                    <div class="stat-label">Critical</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value stat-warning">{{WARN_COUNT}}</div>
+                    <div class="stat-label">Warnings</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value stat-info">{{INFO_COUNT}}</div>
+                    <div class="stat-label">Info</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value stat-pass">{{PASS_COUNT}}</div>
+                    <div class="stat-label">Passed</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">{{PAGE_COUNT}}</div>
+                    <div class="stat-label">Pages</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════ AEO Score Card ════ -->
+    {{AEO_SECTION}}
+
+    <!-- ════ GEO Score Card ════ -->
+    {{GEO_SECTION}}
+
+    <!-- ════ GBP Score Card ════ -->
+    {{GBP_SECTION}}
+
+    <!-- ════ Issues & Passes ════ -->
+    <div class="section" id="seo">
+        <h2>🔧 Issues Found</h2>
+        {{ISSUES_HTML}}
+
+        <h3 style="margin-top: 24px;">✅ Checks Passed</h3>
+        <ul class="pass-list">
+            {{PASSES_HTML}}
+        </ul>
+    </div>
+
+    <!-- ════ AI Analysis ════ -->
+    {{AI_SECTION}}
+
+    <!-- ════ Pages Analyzed ════ -->
+    <div class="section">
+        <h2>📄 Pages Analyzed</h2>
+        <table style="width:100%; border-collapse: collapse; font-size: 14px;">
+            <thead>
+                <tr style="background: #f8fafc; text-align: left;">
+                    <th style="padding: 8px 12px; border-bottom: 2px solid #e2e8f0;">URL</th>
+                    <th style="padding: 8px 12px; border-bottom: 2px solid #e2e8f0;">Words</th>
+                    <th style="padding: 8px 12px; border-bottom: 2px solid #e2e8f0;">Title</th>
+                    <th style="padding: 8px 12px; border-bottom: 2px solid #e2e8f0;">Schema</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{PAGES_HTML}}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="footer">
+        Generated by <strong>SiteOracle</strong> · Built with ❤️
+    </div>
+
+</div>
+
+<script>
+    // Smooth scroll for anchor links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener('click', function (e) {
+            e.preventDefault();
+            document.querySelector(this.getAttribute('href')).scrollIntoView({
+                behavior: 'smooth'
+            });
+        });
+    });
+</script>
+
+</body>
+</html>
