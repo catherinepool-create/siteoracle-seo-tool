@@ -117,3 +117,193 @@ def extract_schema(html):
         except:
             pass
     return schemas
+
+
+# ── Robots.txt analysis ─────────────────────────────────────────
+
+AI_BOTS = {
+    "GPTBot": "OpenAI ChatGPT / GPTs",
+    "ChatGPT-User": "OpenAI ChatGPT user queries",
+    "Google-Extended": "Google AI Overviews / Gemini",
+    "ClaudeBot": "Anthropic Claude",
+    "Claude-Web": "Anthropic Claude (web)",
+    "PerplexityBot": "Perplexity AI",
+    "Applebot": "Apple Intelligence / Siri",
+    "Bytespider": "ByteDance (TikTok AI)",
+    "CCBot": "Common Crawl (AI training)",
+    "FacebookBot": "Meta AI",
+    "cohere-ai": "Cohere AI",
+}
+
+def fetch_robots_txt(url):
+    """Fetch and parse robots.txt for AI bot access rules.
+
+    Args:
+        url: Full URL of the site (e.g. https://example.com)
+
+    Returns:
+        dict with:
+            - has_robots_txt: bool
+            - ai_bots: dict of {bot_name: {"allowed": bool, "disallowed_paths": [str]}}
+            - rules_found: list of rule strings
+            - raw_text: the raw robots.txt (first 2000 chars)
+            - error: str if failed
+    """
+    parsed = urlparse(url)
+    robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+
+    try:
+        resp = requests.get(robots_url, headers={"User-Agent": USER_AGENT}, timeout=10)
+        if resp.status_code != 200:
+            return {
+                "has_robots_txt": False,
+                "ai_bots": {},
+                "rules_found": [],
+                "raw_text": "",
+                "error": f"HTTP {resp.status_code}",
+            }
+
+        raw = resp.text
+        lines = raw.split("\n")
+        rules_found = []
+        ai_bots = {}
+
+        current_agent = None
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+
+            # Check if this is a bot we care about
+            if stripped.lower().startswith("user-agent:"):
+                agent = stripped.split(":", 1)[1].strip()
+                if agent == "*":
+                    current_agent = "*"
+                elif agent in AI_BOTS:
+                    current_agent = agent
+                else:
+                    current_agent = None
+                continue
+
+            if current_agent is None:
+                continue
+
+            if stripped.lower().startswith("disallow:"):
+                path = stripped.split(":", 1)[1].strip()
+                rules_found.append(f"{current_agent}: {stripped}")
+
+                if current_agent not in ai_bots:
+                    ai_bots[current_agent] = {
+                        "name": current_agent,
+                        "label": AI_BOTS.get(current_agent, current_agent),
+                        "allowed": True,
+                        "disallowed_paths": [],
+                    }
+                ai_bots[current_agent]["allowed"] = False
+                ai_bots[current_agent]["disallowed_paths"].append(path or "/")
+
+            elif stripped.lower().startswith("allow:"):
+                path = stripped.split(":", 1)[1].strip()
+                rules_found.append(f"{current_agent}: {stripped}")
+
+        # For wildcard (*) — check if AI bots are covered by it
+        if "*" in ai_bots:
+            wildcard_rules = ai_bots["*"]
+            for bot_name in AI_BOTS:
+                if bot_name not in ai_bots:
+                    # Inherits wildcard rules
+                    ai_bots[bot_name] = {
+                        "name": bot_name,
+                        "label": AI_BOTS[bot_name],
+                        "allowed": wildcard_rules["allowed"],
+                        "disallowed_paths": list(wildcard_rules["disallowed_paths"]),
+                        "inherited_from_wildcard": True,
+                    }
+
+        # Any bot not mentioned and not covered by wildcard defaults to allowed
+        for bot_name, label in AI_BOTS.items():
+            if bot_name not in ai_bots:
+                ai_bots[bot_name] = {
+                    "name": bot_name,
+                    "label": label,
+                    "allowed": True,
+                    "disallowed_paths": [],
+                    "no_rules_found": True,
+                }
+
+        return {
+            "has_robots_txt": True,
+            "ai_bots": ai_bots,
+            "rules_found": rules_found,
+            "raw_text": raw[:2000],
+            "error": None,
+        }
+
+    except requests.RequestException as e:
+        return {
+            "has_robots_txt": False,
+            "ai_bots": {},
+            "rules_found": [],
+            "raw_text": "",
+            "error": str(e),
+        }
+
+
+def extract_schema_types(html):
+    """Extract specific schema.org types from JSON-LD on the page.
+
+    Args:
+        html: Raw HTML string
+
+    Returns:
+        dict with types found and count
+    """
+    soup = BeautifulSoup(html, "lxml")
+    types = {}
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            import json
+            data = json.loads(script.string)
+            # Handle @graph arrays
+            if isinstance(data, dict):
+                items = [data]
+            elif isinstance(data, list):
+                items = data
+            else:
+                continue
+
+            for item in items:
+                schema_type = item.get("@type", "")
+                if isinstance(schema_type, list):
+                    for t in schema_type:
+                        types[t] = types.get(t, 0) + 1
+                else:
+                    types[schema_type] = types.get(schema_type, 0) + 1
+        except Exception:
+            pass
+
+    return types
+
+
+IMPORTANT_SCHEMA_TYPES = [
+    "Organization",
+    "LocalBusiness",
+    "Product",
+    "FAQPage",
+    "HowTo",
+    "Article",
+    "BlogPosting",
+    "Review",
+    "Event",
+    "Person",
+    "Service",
+    "BreadcrumbList",
+    "SiteNavigationElement",
+    "WebSite",
+    "WebPage",
+    "ItemList",
+    "Recipe",
+    "VideoObject",
+    "Course",
+    "SoftwareApplication",
+]
