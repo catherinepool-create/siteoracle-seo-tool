@@ -2,9 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies for WeasyPrint (PDF generation)
+# WeasyPrint needs: pango, cairo, gdk-pixbuf, GLib
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0 \
+    libffi-dev libcairo2 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy project

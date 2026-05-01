@@ -351,6 +351,30 @@ def generate_html_report(url, pages, seo_results, aeo_results, geo_results, gbp_
     return html
 
 
+def generate_pdf_report(url, pages, seo_results, aeo_results, geo_results, gbp_results, ai_analysis=""):
+    """Generate a PDF report from the HTML template.
+
+    Uses WeasyPrint for clean HTML→PDF conversion with full CSS support.
+    Falls back gracefully if WeasyPrint is not available.
+
+    Returns:
+        bytes: PDF content, or None if generation fails
+    """
+    html = generate_html_report(url, pages, seo_results, aeo_results, geo_results, gbp_results, ai_analysis)
+    if not html or html.startswith("<html><body><h1>Template not found"):
+        return None
+
+    try:
+        from weasyprint import HTML as WeasyHTML
+        pdf_bytes = WeasyHTML(string=html).write_pdf()
+        return pdf_bytes
+    except ImportError:
+        return None
+    except Exception as e:
+        print(f"PDF generation failed: {e}")
+        return None
+
+
 def _estimate_improvement(priority_list):
     """Estimate score improvement if all priority items are fixed.
 

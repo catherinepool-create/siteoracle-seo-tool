@@ -13,7 +13,7 @@ from check_aeo import check_aeo
 from check_geo import check_geo
 from check_gbp import check_gbp, extract_business_info
 from analyzer import analyze_site, analyze_screenshot
-from reporter import generate_report, generate_html_report, _build_priority_fix_list, _estimate_improvement
+from reporter import generate_report, generate_html_report, generate_pdf_report, _build_priority_fix_list, _estimate_improvement
 from comparison import compare_sites, generate_comparison_report
 from monitor import setup_monitor, load_monitors, save_snapshot, get_trend, generate_trend_report
 
@@ -323,14 +323,14 @@ with tab_analyze:
                 st.markdown(ai_text)
 
         # ── Report Download ──
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             html = generate_html_report(url, pages, seo, aeo, geo, gbp, ai_text)
-            report_filename = f"siteoracle_{url.replace('https://', '').replace('/', '_')[:30]}.html"
+            report_filename_base = f"siteoracle_{url.replace('https://', '').replace('/', '_')[:30]}"
             st.download_button(
                 "📄 Download HTML Report",
                 html,
-                file_name=report_filename,
+                file_name=f"{report_filename_base}.html",
                 mime="text/html",
                 use_container_width=True,
             )
@@ -339,10 +339,23 @@ with tab_analyze:
             st.download_button(
                 "📝 Download Text Report",
                 text,
-                file_name=report_filename.replace(".html", ".txt"),
+                file_name=f"{report_filename_base}.txt",
                 mime="text/plain",
                 use_container_width=True,
             )
+        with col3:
+            with st.spinner("Generating PDF..."):
+                pdf_bytes = generate_pdf_report(url, pages, seo, aeo, geo, gbp, ai_text)
+            if pdf_bytes:
+                st.download_button(
+                    "📕 Download PDF Report",
+                    pdf_bytes,
+                    file_name=f"{report_filename_base}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
+            else:
+                st.button("📕 PDF (unavailable)", disabled=True, use_container_width=True)
 
         # ── Upgrade Prompt ──
         st.markdown("""
