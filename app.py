@@ -13,7 +13,7 @@ from check_aeo import check_aeo
 from check_geo import check_geo
 from check_gbp import check_gbp, extract_business_info
 from analyzer import analyze_site, analyze_screenshot
-from reporter import generate_report, generate_html_report
+from reporter import generate_report, generate_html_report, _build_priority_fix_list, _estimate_improvement
 from comparison import compare_sites, generate_comparison_report
 from monitor import setup_monitor, load_monitors, save_snapshot, get_trend, generate_trend_report
 
@@ -252,6 +252,38 @@ with tab_analyze:
         with comb_c:
             color = "#22c55e" if combined >= 70 else "#f59e0b" if combined >= 40 else "#ef4444"
             st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:{color}">{combined}</div><div class="metric-label">Combined</div></div>""", unsafe_allow_html=True)
+
+        # ── Priority Fix List ──
+        priority_list = _build_priority_fix_list(seo, aeo, geo, gbp)
+        if priority_list:
+            improvement = _estimate_improvement(priority_list)
+            expected = combined + improvement
+
+            st.markdown("### 🎯 Priority Fix List")
+            st.caption(f"Fix these {len(priority_list)} items to reach an estimated score of **{expected}/100** (+{improvement} pts)")
+
+            for item in priority_list:
+                sev = item["severity"]
+                emoji = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(sev, "⚪")
+                border = {"critical": "#ef4444", "warning": "#f59e0b", "info": "#3b82f6"}
+                st.markdown(f"""
+                <div style="display: flex; gap: 12px; padding: 12px; margin-bottom: 8px;
+                            background: #1e293b; border-radius: 8px; border-left: 4px solid {border[sev]};">
+                    <div style="flex-shrink: 0; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+                                background: #0f172a; border-radius: 50%; font-weight: 700; font-size: 13px;">{item['priority']}</div>
+                    <div style="flex: 1;">
+                        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 2px;">
+                            <span style="font-size: 11px; font-weight: 700; color: {border[sev]};">{emoji} {sev.upper()}</span>
+                            <span style="font-size: 11px; color: #64748b; background: #0f172a; padding: 2px 8px; border-radius: 4px;">{item['area']}</span>
+                        </div>
+                        <div style="font-weight: 600; color: #f1f5f9; font-size: 14px;">{item['check']}</div>
+                        <div style="font-size: 13px; color: #94a3b8;">{item['detail']}</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.success("✅ No issues found — your site is in great shape!")
+            expected = combined
 
         # ── Record this scan ──
         _record_scan()
