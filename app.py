@@ -25,17 +25,21 @@ st.set_page_config(
 st.markdown("""
 <style>
     .main { padding: 1rem; }
-    .stApp { background: #f8fafc; }
-    h1, h2, h3 { color: #0f172a !important; }
-    .stTabs [data-baseweb="tab-list"] { gap: 4px; background: #e2e8f0; padding: 4px; border-radius: 10px; }
+    /* Theme-aware colors using CSS variables */
+    h1, h2, h3 { color: inherit !important; }
+    .stTabs [data-baseweb="tab-list"] { gap: 4px; padding: 4px; border-radius: 10px; }
     .stTabs [data-baseweb="tab"] { border-radius: 8px; padding: 8px 16px; }
-    .report-box { background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin: 1rem 0; border: 1px solid #e2e8f0; }
-    .metric-box { text-align: center; padding: 1rem; background: white; border-radius: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    .metric-box { text-align: center; padding: 1rem; border-radius: 10px; margin-bottom: 0.5rem; }
     .metric-value { font-size: 32px; font-weight: 700; }
-    .metric-label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.3px; }
-    .status-pass { color: #22c55e; }
-    .status-warn { color: #f59e0b; }
-    .status-fail { color: #ef4444; }
+    .metric-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; }
+    /* Remove hardcoded background colors from streamlit elements */
+    .stButton button { width: 100%; }
+    /* Fix expander content readability */
+    .streamlit-expanderContent { font-size: 14px; }
+    /* Download buttons */
+    .stDownloadButton button { width: 100%; }
+    /* Make text in status messages readable */
+    div[data-testid="stStatusWidget"] { color: inherit; }
 </style>
 """, unsafe_allow_html=True)
 
