@@ -204,6 +204,66 @@
         }
         .pass-list li::before { content: '✅ '; }
 
+        /* ── Priority Fix List ─────────────────────────────── */
+        .priority-item {
+            display: flex;
+            gap: 16px;
+            padding: 16px;
+            margin-bottom: 8px;
+            background: #f8fafc;
+            border-radius: 10px;
+            border-left: 4px solid #e2e8f0;
+            transition: background 0.15s;
+        }
+        .priority-item:hover { background: #f1f5f9; }
+        .priority-item.critical { border-left-color: #ef4444; }
+        .priority-item.warning { border-left-color: #f59e0b; }
+        .priority-item.info { border-left-color: #3b82f6; }
+        .priority-number {
+            flex-shrink: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: white;
+            border-radius: 50%;
+            font-weight: 700;
+            font-size: 14px;
+            color: #0f172a;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .priority-content { flex: 1; min-width: 0; }
+        .priority-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+        .priority-severity {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .priority-area {
+            font-size: 11px;
+            color: #94a3b8;
+            background: #e2e8f0;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+        .priority-check {
+            font-weight: 600;
+            color: #1e293b;
+            font-size: 14px;
+            margin-bottom: 2px;
+        }
+        .priority-detail {
+            font-size: 13px;
+            color: #64748b;
+        }
+
         /* ── AI Analysis ──────────────────────────────────── */
         .ai-content { font-size: 15px; line-height: 1.8; }
         .ai-content h1, .ai-content h2, .ai-content h3, .ai-content h4 {
@@ -380,6 +440,26 @@
         </div>
     </div>
 
+    <!-- ════ Priority Fix List ════ -->
+    <div class="section" id="priority">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;">
+            <h2 style="margin-bottom: 0;">🎯 Priority Fix List</h2>
+            <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                <span style="font-size: 13px; color: #64748b;">{{SEV_SUMMARY}}</span>
+                <div style="background: {{COMBINED_COLOR}}; color: white; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 600;">
+                    {{FIX_COUNT}} fixes → +{{IMPROVEMENT}} pts
+                </div>
+            </div>
+        </div>
+        <div style="background: linear-gradient(135deg, #f8fafc, #f1f5f9); border-radius: 12px; padding: 20px; margin-bottom: 20px; text-align: center;">
+            <div style="font-size: 14px; color: #64748b;">Estimated score after fixing priority items</div>
+            <div style="font-size: 42px; font-weight: 700; color: {{COMBINED_COLOR}};">{{COMBINED_SCORE}} → {{EXPECTED_SCORE}}</div>
+            <div style="font-size: 14px; color: #64748b;">out of 100</div>
+        </div>
+        {{PRIORITY_HTML}}
+    </div>
+
+    <!-- ════ Score Cards ════ -->
     <!-- ════ AEO Score Card ════ -->
     {{AEO_SECTION}}
 

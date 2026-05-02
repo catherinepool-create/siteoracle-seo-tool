@@ -9,6 +9,9 @@ def generate_report(url, pages, seo_results, aeo_results, geo_results, gbp_resul
     """Generate a comprehensive plain-text report."""
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
+    # Extract AI Visibility score from GEO dimensions
+    ai_vis_score = geo_results.get("dimensions", {}).get("ai_visibility", {}).get("score", 0)
+
     report = f"""
 ╔══════════════════════════════════════════════════════╗
 ║                 SITEORACLE REPORT                    ║
@@ -25,15 +28,27 @@ TECHNICAL SEO SCORE: {seo_results['score']}/100
 AEO SCORE:             {aeo_results['score']}/100
 GEO SCORE:             {geo_results['score']}/100
 GBP ALIGNMENT:         {gbp_results['score']}/100
+AI VISIBILITY:         {ai_vis_score}/100
 """
     # Combined score
     combined = round(
-        seo_results["score"] * 0.35
-        + aeo_results["score"] * 0.25
+        seo_results["score"] * 0.20
+        + aeo_results["score"] * 0.15
         + geo_results["score"] * 0.25
-        + gbp_results["score"] * 0.15
+        + gbp_results["score"] * 0.10
+        + ai_vis_score * 0.30
     )
     report += f"COMBINED SCORE:       {combined}/100\n\n"
+
+    # ── Priority Fix List ──
+    priority_list = _build_priority_fix_list(seo_results, aeo_results, geo_results, gbp_results)
+    if priority_list:
+        report += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        report += "PRIORITY FIX LIST — Fix These First\n"
+        report += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        report += f"Estimated score after fixing all: +{_estimate_improvement(priority_list)} points\n\n"
+        report += _format_priority_list(priority_list, format="text")
+        report += "\n\n"
 
     if seo_results.get("issues"):
         report += "─── TECHNICAL SEO ISSUES ───\n\n"
@@ -101,6 +116,19 @@ def generate_html_report(url, pages, seo_results, aeo_results, geo_results, gbp_
     html = template_path.read_text(encoding="utf-8")
 
     now = datetime.datetime.now().strftime("%B %d, %Y at %I:%M %p")
+
+    # Extract AI Visibility score
+    ai_vis_score = geo_results.get("dimensions", {}).get("ai_visibility", {}).get("score", 0)
+
+    # ── Combined Score ──
+    combined = round(
+        seo_results.get("score", 0) * 0.20
+        + aeo_results.get("score", 0) * 0.15
+        + geo_results.get("score", 0) * 0.25
+        + gbp_results.get("score", 0) * 0.10
+        + ai_vis_score * 0.30
+    )
+    combined_color = "#22c55e" if combined >= 70 else "#f59e0b" if combined >= 40 else "#ef4444"
 
     # ── Technical SEO ──
     score = seo_results.get("score", 0)
@@ -259,6 +287,30 @@ def generate_html_report(url, pages, seo_results, aeo_results, geo_results, gbp_
     total_checks = sum(len(v.get("issues", [])) + len(v.get("passes", []))
                        for v in [seo_results, aeo_results, geo_results, gbp_results])
 
+    # ── Priority Fix List ──
+    priority_list = _build_priority_fix_list(seo_results, aeo_results, geo_results, gbp_results)
+    if priority_list:
+        fix_count = len(priority_list)
+        improvement = _estimate_improvement(priority_list)
+        priority_html = _format_priority_list(priority_list, format="html")
+
+        # Count critical/warning/info
+        crit = sum(1 for i in priority_list if i["severity"] == "critical")
+        warn = sum(1 for i in priority_list if i["severity"] == "warning")
+        info = sum(1 for i in priority_list if i["severity"] == "info")
+        sev_summary = []
+        if crit: sev_summary.append(f"🔴 {crit} critical")
+        if warn: sev_summary.append(f"🟡 {warn} important")
+        if info: sev_summary.append(f"🔵 {info} suggestions")
+        sev_summary_str = " · ".join(sev_summary)
+    else:
+        fix_count = 0
+        improvement = 0
+        priority_html = '<p style="color: #22c55e; font-weight: 600;">✅ No issues found — your site is in great shape!</p>'
+        sev_summary_str = ""
+
+    expected = f"{combined + improvement}" if improvement > 0 else str(combined)
+
     replacements = {
         "{{TITLE}}": f"SiteOracle Report — {url}",
         "{{URL}}": url,
@@ -283,12 +335,157 @@ def generate_html_report(url, pages, seo_results, aeo_results, geo_results, gbp_
         "{{AEO_SECTION}}": aeo_section,
         "{{GEO_SECTION}}": geo_section,
         "{{GBP_SECTION}}": gbp_section,
+        "{{PRIORITY_HTML}}": priority_html,
+        "{{FIX_COUNT}}": str(fix_count),
+        "{{IMPROVEMENT}}": str(improvement),
+        "{{EXPECTED_SCORE}}": expected,
+        "{{COMBINED_SCORE}}": str(combined),
+        "{{COMBINED_COLOR}}": combined_color,
+        "{{SEV_SUMMARY}}": sev_summary_str,
+        "{{AI_VIS_SCORE}}": str(ai_vis_score),
     }
 
     for key, val in replacements.items():
         html = html.replace(key, val)
 
     return html
+
+
+def generate_pdf_report(url, pages, seo_results, aeo_results, geo_results, gbp_results, ai_analysis=""):
+    """Generate a PDF report from the HTML template.
+
+    Uses WeasyPrint for clean HTML→PDF conversion with full CSS support.
+    Falls back gracefully if WeasyPrint is not available.
+
+    Returns:
+        bytes: PDF content, or None if generation fails
+    """
+    html = generate_html_report(url, pages, seo_results, aeo_results, geo_results, gbp_results, ai_analysis)
+    if not html or html.startswith("<html><body><h1>Template not found"):
+        return None
+
+    try:
+        from weasyprint import HTML as WeasyHTML
+        pdf_bytes = WeasyHTML(string=html).write_pdf()
+        return pdf_bytes
+    except ImportError:
+        return None
+    except Exception as e:
+        print(f"PDF generation failed: {e}")
+        return None
+
+
+def _estimate_improvement(priority_list):
+    """Estimate score improvement if all priority items are fixed.
+
+    Args:
+        priority_list: List from _build_priority_fix_list()
+
+    Returns:
+        int: Estimated points of improvement
+    """
+    # Each critical fix ≈ 8 points, warning ≈ 4, info ≈ 2
+    points = sum(
+        {"critical": 8, "warning": 4, "info": 2}.get(i["severity"], 2)
+        for i in priority_list
+    )
+    return min(points, 50)
+
+
+def _build_priority_fix_list(seo_results, aeo_results, geo_results, gbp_results):
+    """Build a numbered priority fix list from all issues across modules.
+
+    Collects all issues, deduplicates by check name, sorts by severity
+    (critical → warning → info), and returns an ordered list.
+
+    Returns:
+        list of dicts: [{"priority": 1, "area": "SEO", "severity": "critical",
+                         "check": "...", "detail": "..."}, ...]
+    """
+    all_issues = []
+
+    for area, results in [
+        ("Technical SEO", seo_results),
+        ("AEO", aeo_results),
+        ("GEO", geo_results),
+        ("GBP", gbp_results),
+    ]:
+        for issue in results.get("issues", []):
+            all_issues.append({
+                "area": area,
+                "severity": issue.get("severity", "info"),
+                "check": issue.get("check", ""),
+                "detail": issue.get("detail", ""),
+            })
+
+    # Deduplicate by check name (keep highest severity)
+    seen = {}
+    for issue in all_issues:
+        key = issue["check"].lower().strip()
+        if key not in seen:
+            seen[key] = issue
+        else:
+            # Keep the one with higher severity
+            sev_order = {"critical": 0, "warning": 1, "info": 2}
+            if sev_order.get(issue["severity"], 2) < sev_order.get(seen[key]["severity"], 2):
+                seen[key] = issue
+
+    # Sort: severity (critical first), then area
+    severity_order = {"critical": 0, "warning": 1, "info": 2}
+    sorted_issues = sorted(
+        seen.values(),
+        key=lambda i: (severity_order.get(i["severity"], 2), i["area"]),
+    )
+
+    # Number them
+    for idx, issue in enumerate(sorted_issues, 1):
+        issue["priority"] = idx
+
+    return sorted_issues
+
+
+def _format_priority_list(priority_list, format="text"):
+    """Format priority fix list as text or HTML.
+
+    Args:
+        priority_list: List from _build_priority_fix_list()
+        format: "text" or "html"
+
+    Returns:
+        str: Formatted list
+    """
+    if not priority_list:
+        return ""
+
+    if format == "html":
+        items = []
+        for item in priority_list:
+            sev_color = {"critical": "#ef4444", "warning": "#f59e0b", "info": "#3b82f6"}
+            badge = {"critical": "🔴", "warning": "🟡", "info": "🔵"}
+            items.append(f"""<div class="priority-item {item['severity']}">
+                <span class="priority-number">{item['priority']}</span>
+                <div class="priority-content">
+                    <div class="priority-header">
+                        <span class="priority-severity" style="color:{sev_color.get(item['severity'], '#94a3b8')};">
+                            {badge.get(item['severity'], '⚪')} {item['severity'].upper()}
+                        </span>
+                        <span class="priority-area">{item['area']}</span>
+                    </div>
+                    <div class="priority-check">{item['check']}</div>
+                    <div class="priority-detail">{item['detail']}</div>
+                </div>
+            </div>""")
+        return "\n".join(items)
+    else:
+        items = []
+        for item in priority_list:
+            badge = {"critical": "🔴", "warning": "🟡", "info": "🔵"}
+            items.append(
+                f"{item['priority']}. {badge.get(item['severity'], '⚪')} "
+                f"[{item['severity'].upper()}] [{item['area']}] "
+                f"{item['check']}\n   {item['detail']}"
+            )
+        return "\n\n".join(items)
 
 
 def _htmlize(text):

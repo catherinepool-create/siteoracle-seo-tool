@@ -3,15 +3,17 @@
 import streamlit as st
 import os
 import datetime
+import hashlib
+import json
 from pathlib import Path
 
-from crawler import crawl
+from crawler import crawl, fetch_page
 from check_seo import check_technical_seo
 from check_aeo import check_aeo
 from check_geo import check_geo
 from check_gbp import check_gbp, extract_business_info
 from analyzer import analyze_site, analyze_screenshot
-from reporter import generate_report, generate_html_report
+from reporter import generate_report, generate_html_report, generate_pdf_report, _build_priority_fix_list, _estimate_improvement
 from comparison import compare_sites, generate_comparison_report
 from monitor import setup_monitor, load_monitors, save_snapshot, get_trend, generate_trend_report
 
@@ -21,25 +23,83 @@ st.set_page_config(
     layout="wide",
 )
 
+# ── Rate Limiting ──────────────────────────────────────────────
+RATE_LIMIT_FILE = Path("/tmp/siteoracle_ratelimit.json")
+
+def _load_rate_limits():
+    if RATE_LIMIT_FILE.exists():
+        return json.loads(RATE_LIMIT_FILE.read_text())
+    return {}
+
+def _save_rate_limits(data):
+    RATE_LIMIT_FILE.write_text(json.dumps(data))
+
+def _get_client_id():
+    """Create a consistent ID from the user's IP (via forwarded headers) or session."""
+    forwarded = os.environ.get("HTTP_X_FORWARDED_FOR", "") or \
+                os.environ.get("X_FORWARDED_FOR", "")
+    if forwarded:
+        ip = forwarded.split(",")[0].strip()
+    else:
+        # Fall back to session-based ID for local dev
+        if "client_id" not in st.session_state:
+            st.session_state.client_id = hashlib.md5(
+                str(datetime.datetime.now().timestamp()).encode()
+            ).hexdigest()[:12]
+        return st.session_state.client_id
+    return hashlib.md5(ip.encode()).hexdigest()[:16]
+
+def _check_rate_limit():
+    """Check if this client has used their free scan today. Returns True if allowed."""
+    client_id = _get_client_id()
+    limits = _load_rate_limits()
+    today = datetime.date.today().isoformat()
+
+    if client_id in limits:
+        entry = limits[client_id]
+        if entry.get("date") == today and entry.get("count", 0) >= 1:
+            return False
+    return True
+
+def _is_pro_user():
+    """Simple check: if they've set an API key in session or env, they're 'pro'."""
+    # For now, this is a stub — we'll wire up real Stripe/account auth later.
+    # Returns True to bypass rate limits for testing.
+    return False
+
+def _record_scan():
+    """Record a free scan for this client."""
+    client_id = _get_client_id()
+    limits = _load_rate_limits()
+    today = datetime.date.today().isoformat()
+    limits[client_id] = {"date": today, "count": 1}
+    _save_rate_limits(limits)
+
 # ── CSS ──────────────────────────────────────────────────────────
 st.markdown("""
 <style>
     .main { padding: 1rem; }
-    /* Theme-aware colors using CSS variables */
     h1, h2, h3 { color: inherit !important; }
     .stTabs [data-baseweb="tab-list"] { gap: 4px; padding: 4px; border-radius: 10px; }
     .stTabs [data-baseweb="tab"] { border-radius: 8px; padding: 8px 16px; }
     .metric-box { text-align: center; padding: 1rem; border-radius: 10px; margin-bottom: 0.5rem; }
     .metric-value { font-size: 32px; font-weight: 700; }
     .metric-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; }
-    /* Remove hardcoded background colors from streamlit elements */
     .stButton button { width: 100%; }
-    /* Fix expander content readability */
     .streamlit-expanderContent { font-size: 14px; }
-    /* Download buttons */
     .stDownloadButton button { width: 100%; }
-    /* Make text in status messages readable */
     div[data-testid="stStatusWidget"] { color: inherit; }
+    /* Upgrade card styling */
+    .upgrade-card {
+        background: linear-gradient(135deg, #1e293b, #0f172a);
+        border: 1px solid #ff5555;
+        border-radius: 12px;
+        padding: 2rem;
+        text-align: center;
+        margin: 2rem 0;
+    }
+    .upgrade-card h2 { color: #ff5555 !important; margin-bottom: 0.5rem; }
+    .upgrade-card p { color: #94a3b8; margin-bottom: 1.5rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -74,13 +134,12 @@ with tab_analyze:
     col1, col2, col3 = st.columns(3)
     with col1:
         use_ai = st.checkbox("AI Deep Analysis", value=True,
-                             help="Uses DeepSeek/OpenAI/Claude for 6-dimension analysis")
+                             help="Uses DeepSeek AI for comprehensive analysis")
     with col2:
-        engine = st.selectbox("AI Engine", ["deepseek", "openai", "claude"],
-                              help="Requires the corresponding API key in Settings")
-    with col3:
         biz_name = st.text_input("Business name (for GBP)", placeholder="Optional",
                                  help="Helps with Google Business Profile alignment checks")
+    with col3:
+        st.markdown("")  # spacer
 
     col1, col2 = st.columns([1, 1])
     with col1:
@@ -90,24 +149,36 @@ with tab_analyze:
                                             label_visibility="collapsed")
 
     if screenshot_file:
-        # Screenshot mode
         ext = screenshot_file.name.rsplit(".", 1)[-1]
         temp_path = Path(f"/tmp/siteoracle_screenshot.{ext}")
         temp_path.write_bytes(screenshot_file.getvalue())
         st.image(screenshot_file, caption="Uploaded Screenshot", use_container_width=True)
 
         if st.button("📸 Analyze Screenshot", type="primary"):
-            if not os.getenv("OPENAI_API_KEY"):
-                st.error("Screenshot analysis requires an OpenAI API key. Set it in Settings tab.")
-                st.stop()
-            with st.spinner("Analyzing screenshot..."):
-                result = analyze_screenshot(str(temp_path))
-            st.markdown("### 📸 Screenshot Analysis")
-            st.markdown(result)
+            if not _check_rate_limit():
+                st.warning("You've used your free scan for today. You get 1 free scan every 24 hours — upgrade for unlimited access.")
+            elif not os.getenv("OPENAI_API_KEY"):
+                st.warning("Screenshot analysis uses OpenAI Vision — set your key in Settings (Advanced) or upgrade to Pro for included access.")
+            else:
+                with st.spinner("Analyzing screenshot..."):
+                    result = analyze_screenshot(str(temp_path))
+                st.markdown("### 📸 Screenshot Analysis")
+                st.markdown(result)
 
     elif run_btn and url:
         if not url.startswith("http"):
             url = "https://" + url
+
+        # ── Rate limit check ──
+        if not _check_rate_limit():
+            st.warning("You've used your free scan for today. You get 1 free scan every 24 hours — upgrade for unlimited access.")
+            st.markdown("""
+            <div class="upgrade-card">
+                <h2>🚀 Upgrade to SiteOracle Pro</h2>
+                <p>Unlock unlimited scans, all AI engines, PDF reports, competitor monitoring, and more.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            st.stop()
 
         # ── Crawl ──
         with st.status("🔍 Crawling site...") as status:
@@ -117,6 +188,9 @@ with tab_analyze:
                 st.stop()
             status.update(label=f"✅ Crawled {len(pages)} pages", state="complete")
 
+        # Also fetch homepage raw HTML for schema analysis
+        homepage_html, _ = fetch_page(url)
+
         # ── Run Checks ──
         with st.status("Running checks...") as status:
             seo = check_technical_seo(pages)
@@ -125,8 +199,8 @@ with tab_analyze:
             aeo = check_aeo(pages)
             status.update(label="✅ AEO done")
 
-            geo = check_geo(pages)
-            status.update(label="✅ GEO done")
+            geo = check_geo(pages, html=homepage_html, url=url)
+            status.update(label="✅ GEO + AI Visibility done")
 
             biz_info = {"name": biz_name} if biz_name else None
             gbp = check_gbp(pages, biz_info)
@@ -135,26 +209,31 @@ with tab_analyze:
         # ── AI Analysis ──
         ai_text = ""
         if use_ai:
-            api_key = {
-                "deepseek": os.getenv("DEEPSEEK_API_KEY"),
-                "openai": os.getenv("OPENAI_API_KEY"),
-                "claude": os.getenv("ANTHROPIC_API_KEY"),
-            }.get(engine)
-
-            if api_key:
-                with st.spinner(f"Running AI analysis ({engine})..."):
+            # Use DeepSeek by default — no API key needed
+            deepseek_key = os.getenv("DEEPSEEK_API_KEY")
+            if deepseek_key:
+                with st.spinner("Running AI analysis..."):
                     try:
-                        ai_text = analyze_site(pages, engine=engine)
+                        ai_text = analyze_site(pages, engine="deepseek")
                     except Exception as e:
                         st.warning(f"AI analysis failed: {e}")
                         ai_text = ""
             else:
-                st.info(f"No {engine.upper()}_API_KEY found. AI analysis skipped. Configure in Settings tab.")
+                st.info("AI analysis unavailable — server configuration issue. Results still show below.")
 
         # ── Display Scores ──
-        combined = round(seo["score"] * 0.35 + aeo["score"] * 0.25 + geo["score"] * 0.25 + gbp["score"] * 0.15)
+        # Extract AI Visibility score from GEO dimensions if available
+        ai_vis_score = geo.get("dimensions", {}).get("ai_visibility", {}).get("score", 0)
+        # Combined: SEO 25%, AEO 20%, GEO (incl AI Vis) 30%, GBP 10%, AI Visibility standalone 15%
+        combined = round(
+            seo["score"] * 0.20 +
+            aeo["score"] * 0.15 +
+            geo["score"] * 0.25 +
+            gbp["score"] * 0.10 +
+            ai_vis_score * 0.30
+        )
 
-        s_c, a_c, g_c, gbp_c, comb_c = st.columns(5)
+        s_c, a_c, g_c, gbp_c, ai_c, comb_c = st.columns(6)
         with s_c:
             color = "#22c55e" if seo["score"] >= 70 else "#f59e0b" if seo["score"] >= 40 else "#ef4444"
             st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:{color}">{seo["score"]}</div><div class="metric-label">Technical SEO</div></div>""", unsafe_allow_html=True)
@@ -167,9 +246,47 @@ with tab_analyze:
         with gbp_c:
             color = "#22c55e" if gbp["score"] >= 70 else "#f59e0b" if gbp["score"] >= 40 else "#ef4444"
             st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:{color}">{gbp["score"]}</div><div class="metric-label">GBP</div></div>""", unsafe_allow_html=True)
+        with ai_c:
+            color = "#22c55e" if ai_vis_score >= 70 else "#f59e0b" if ai_vis_score >= 40 else "#ef4444"
+            st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:{color}">{ai_vis_score}</div><div class="metric-label">AI Visibility</div></div>""", unsafe_allow_html=True)
         with comb_c:
             color = "#22c55e" if combined >= 70 else "#f59e0b" if combined >= 40 else "#ef4444"
             st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:{color}">{combined}</div><div class="metric-label">Combined</div></div>""", unsafe_allow_html=True)
+
+        # ── Priority Fix List ──
+        priority_list = _build_priority_fix_list(seo, aeo, geo, gbp)
+        if priority_list:
+            improvement = _estimate_improvement(priority_list)
+            expected = combined + improvement
+
+            st.markdown("### 🎯 Priority Fix List")
+            st.caption(f"Fix these {len(priority_list)} items to reach an estimated score of **{expected}/100** (+{improvement} pts)")
+
+            for item in priority_list:
+                sev = item["severity"]
+                emoji = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(sev, "⚪")
+                border = {"critical": "#ef4444", "warning": "#f59e0b", "info": "#3b82f6"}
+                st.markdown(f"""
+                <div style="display: flex; gap: 12px; padding: 12px; margin-bottom: 8px;
+                            background: #1e293b; border-radius: 8px; border-left: 4px solid {border[sev]};">
+                    <div style="flex-shrink: 0; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+                                background: #0f172a; border-radius: 50%; font-weight: 700; font-size: 13px;">{item['priority']}</div>
+                    <div style="flex: 1;">
+                        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 2px;">
+                            <span style="font-size: 11px; font-weight: 700; color: {border[sev]};">{emoji} {sev.upper()}</span>
+                            <span style="font-size: 11px; color: #64748b; background: #0f172a; padding: 2px 8px; border-radius: 4px;">{item['area']}</span>
+                        </div>
+                        <div style="font-weight: 600; color: #f1f5f9; font-size: 14px;">{item['check']}</div>
+                        <div style="font-size: 13px; color: #94a3b8;">{item['detail']}</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.success("✅ No issues found — your site is in great shape!")
+            expected = combined
+
+        # ── Record this scan ──
+        _record_scan()
 
         # ── Detail Sections ──
         with st.expander("🔧 Technical SEO Details", expanded=True):
@@ -185,6 +302,9 @@ with tab_analyze:
 
         with st.expander("📝 Answer Engine Optimization (AEO)"):
             _show_dimensions(aeo)
+
+        with st.expander("🤖 AI Visibility — Can AI Bots See Your Site?", expanded=True):
+            _show_ai_visibility(geo)
 
         with st.expander("🤖 Generative Engine Optimization (GEO)"):
             _show_dimensions(geo)
@@ -203,14 +323,14 @@ with tab_analyze:
                 st.markdown(ai_text)
 
         # ── Report Download ──
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             html = generate_html_report(url, pages, seo, aeo, geo, gbp, ai_text)
-            report_filename = f"siteoracle_{url.replace('https://', '').replace('/', '_')[:30]}.html"
+            report_filename_base = f"siteoracle_{url.replace('https://', '').replace('/', '_')[:30]}"
             st.download_button(
                 "📄 Download HTML Report",
                 html,
-                file_name=report_filename,
+                file_name=f"{report_filename_base}.html",
                 mime="text/html",
                 use_container_width=True,
             )
@@ -219,21 +339,36 @@ with tab_analyze:
             st.download_button(
                 "📝 Download Text Report",
                 text,
-                file_name=report_filename.replace(".html", ".txt"),
+                file_name=f"{report_filename_base}.txt",
                 mime="text/plain",
                 use_container_width=True,
             )
+        with col3:
+            with st.spinner("Generating PDF..."):
+                pdf_bytes = generate_pdf_report(url, pages, seo, aeo, geo, gbp, ai_text)
+            if pdf_bytes:
+                st.download_button(
+                    "📕 Download PDF Report",
+                    pdf_bytes,
+                    file_name=f"{report_filename_base}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
+            else:
+                st.button("📕 PDF (unavailable)", disabled=True, use_container_width=True)
 
-        # ── Offer Monitoring ──
-        if st.button("📊 Start Monitoring This Site", use_container_width=True):
-            config = setup_monitor(url, schedule="weekly", max_pages=max_pages)
-            # Also save the current snapshot
-            snapshot_results = {
-                "seo": seo, "aeo": aeo, "geo": geo, "gbp": gbp,
-                "combined": combined, "pages_analyzed": len(pages)
-            }
-            save_snapshot(config["id"], snapshot_results)
-            st.success(f"Monitoring started for {url}! Check the Monitoring tab.")
+        # ── Upgrade Prompt ──
+        st.markdown("""
+        <div class="upgrade-card">
+            <h2>🚀 Unlock Full Power</h2>
+            <p>You've used your free scan. Upgrade to SiteOracle Pro for:<br>
+            • Unlimited scans • Competitor comparison • Scheduled monitoring • All AI engines • PDF reports</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── Offer Monitoring (Pro feature) ──
+        if st.button("📊 Start Monitoring This Site (Pro)", use_container_width=True):
+            st.info("Monitoring is a Pro feature. Sign up to unlock.")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -241,7 +376,7 @@ with tab_analyze:
 # ══════════════════════════════════════════════════════════════════
 with tab_compare:
     st.markdown("### ⚔️ Compare Two Sites")
-    st.caption("Analyze and compare your site against a competitor.")
+    st.caption("Analyze and compare your site against a competitor. (Pro feature)")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -252,50 +387,13 @@ with tab_compare:
     comp_pages = st.slider("Pages to crawl per site", 1, 10, 3, key="comp_pages")
 
     if st.button("⚔️ Compare", type="primary", use_container_width=True) and site_a and site_b:
-        if not site_a.startswith("http"): site_a = "https://" + site_a
-        if not site_b.startswith("http"): site_b = "https://" + site_b
-
-        with st.spinner("Analyzing both sites..."):
-            comparison = compare_sites([site_a, site_b], max_pages=comp_pages)
-
-        if comparison.get("error"):
-            st.error(f"Comparison failed: {comparison['error']}")
-        else:
-            # Summary
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                s = comparison["sites"][0]
-                color = "#22c55e" if s["combined"] >= 70 else "#f59e0b"
-                st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:{color}">{s["combined"]}</div><div class="metric-label">{s["name"]}</div></div>""", unsafe_allow_html=True)
-            with col2:
-                st.markdown(f"""<div class="metric-box" style="font-size:24px;">vs</div>""", unsafe_allow_html=True)
-            with col3:
-                s = comparison["sites"][1]
-                color = "#22c55e" if s["combined"] >= 70 else "#f59e0b"
-                st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:{color}">{s["combined"]}</div><div class="metric-label">{s["name"]}</div></div>""", unsafe_allow_html=True)
-
-            # Breakdown
-            st.markdown("### 📊 Score Breakdown")
-            for site in comparison["sites"]:
-                if site.get("error"):
-                    st.warning(f"{site['name']}: {site['error']}")
-                else:
-                    with st.expander(f"🔍 {site['name']}"):
-                        cols = st.columns(4)
-                        cols[0].metric("SEO", f"{site['seo']['score']}/100")
-                        cols[1].metric("AEO", f"{site['aeo']['score']}/100")
-                        cols[2].metric("GEO", f"{site['geo']['score']}/100")
-                        cols[3].metric("GBP", f"{site['gbp']['score']}/100")
-
-            # Gap analysis
-            if comparison.get("gaps"):
-                st.markdown("### 🔍 Key Differentiators")
-                for g in comparison["gaps"]:
-                    st.markdown(f"**{g['area']}**: {g['leader']} leads by **{g['gap']}** points")
-
-            # Full report
-            report_text = generate_comparison_report(comparison)
-            st.text(report_text)
+        st.info("🔒 Comparison is a Pro feature. Create an account to unlock competitive analysis.")
+        st.markdown("""
+        <div class="upgrade-card">
+            <h2>🚀 Upgrade to SiteOracle Pro</h2>
+            <p>Unlock competitor comparison, unlimited scans, monitoring, and more.</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -303,62 +401,59 @@ with tab_compare:
 # ══════════════════════════════════════════════════════════════════
 with tab_monitor:
     st.markdown("### 📊 Site Monitoring")
-    st.caption("Track scores over time with scheduled snapshots.")
+    st.caption("Track scores over time with scheduled snapshots. (Pro feature)")
 
-    monitors = load_monitors()
-    if not monitors:
-        st.info("No monitors set up yet. Run an analysis and click 'Start Monitoring' to begin.")
-    else:
-        for mon in monitors:
-            with st.expander(f"📊 {mon.get('name', mon['url'])} — {mon.get('schedule', '?')}", expanded=True):
-                col1, col2, col3 = st.columns(3)
-                with col1: st.metric("Snapshots", len(mon.get("history", [])))
-                with col2: st.metric("Schedule", mon.get("schedule", "unknown"))
-                with col3: st.metric("Last Run", mon.get("last_run", "never")[:10] if mon.get("last_run") else "never")
-
-                trend = get_trend(mon["id"])
-                if trend:
-                    st.markdown("#### Trend (Last 10 Snapshots)")
-                    st.line_chart({k: [s[k] for s in trend] for k in ["seo_score", "aeo_score", "geo_score", "combined_score"]})
-
-                    # Mini report
-                    report = generate_trend_report(mon["id"])
-                    st.text(report)
+    st.markdown("""
+    <div class="upgrade-card">
+        <h2>📊 Monitoring — Pro Feature</h2>
+        <p>Track your site's performance over time with automated weekly snapshots.<br>
+        See trends, get alerts, and prove your SEO improvements.</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════
 # TAB: SETTINGS
 # ══════════════════════════════════════════════════════════════════
 with tab_settings:
-    st.markdown("### ⚙️ API Keys")
-    st.caption("Set API keys for AI analysis features. Keys are stored in environment variables.")
+    st.markdown("### ⚙️ Advanced Settings")
+    st.caption("For power users who want to use their own API keys.")
 
-    keys = {
-        "DEEPSEEK_API_KEY": os.getenv("DEEPSEEK_API_KEY", ""),
-        "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY", ""),
-        "ANTHROPIC_API_KEY": os.getenv("ANTHROPIC_API_KEY", ""),
-    }
+    with st.expander("🔑 Bring Your Own API Key (Optional)"):
+        st.markdown("""
+        Provide your own API key to use alternative AI engines.  
+        SiteOracle uses DeepSeek by default — no key required for basic scans.
+        """)
 
-    for name, val in keys.items():
-        masked = val[:8] + "..." + val[-4:] if len(val) > 12 else ("<not set>" if not val else val)
-        st.text_input(name, value=val, type="password",
-                      help=f"Current: {masked}")
+        keys = {
+            "DEEPSEEK_API_KEY": os.getenv("DEEPSEEK_API_KEY", ""),
+            "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY", ""),
+            "ANTHROPIC_API_KEY": os.getenv("ANTHROPIC_API_KEY", ""),
+        }
+
+        for name, val in keys.items():
+            masked = val[:8] + "..." + val[-4:] if len(val) > 12 else ("<not set>" if not val else val)
+            st.text_input(name, value=val, type="password",
+                          help=f"Current: {masked}")
+
+        st.caption("⚠️ Keys set here override default behavior. If you remove them, DeepSeek defaults resume.")
 
     st.markdown("---")
     st.markdown("""
     ### About SiteOracle
-    
-    **Version**: 1.0  
+
+    **Version**: 1.1  
     **Capabilities**:  
     - 🔧 Technical SEO (15+ rules-based checks, scored /100)  
     - 📝 Answer Engine Optimization (7 dimensions)  
-    - 🤖 Generative Engine Optimization (7 dimensions)  
+    - 🤖 **AI Visibility Score** — checks which AI bots can see your site (ChatGPT, Claude, Perplexity, Gemini)  
+    - 🤖 Generative Engine Optimization (8 dimensions incl. AI Visibility)  
     - 📍 Google Business Profile alignment (7 dimensions)  
-    - 🤖 AI deep analysis (6 dimensions via DeepSeek/OpenAI/Claude)  
-    - ⚔️ Competitive comparison  
-    - 📊 Scheduled monitoring  
+    - 🤖 AI deep analysis (via DeepSeek AI)  
+    - ⚔️ Competitive comparison (Pro)  
+    - 📊 Scheduled monitoring (Pro)  
     - 📄 Beautiful HTML reports
-    
+
     Built with ❤️ — ask Catherine about it.
     """)
 
@@ -392,5 +487,65 @@ def _show_dimensions(results):
             st.markdown(f"{emoji} **{issue['check']}** — {issue['detail']}")
     if all_passes:
         st.markdown("**Passes**")
+        for p in all_passes:
+            st.markdown(f"✅ {p}")
+
+
+def _show_ai_visibility(geo_results):
+    """Display the AI Visibility section — the flagship feature."""
+    dims = geo_results.get("dimensions", {})
+    ai_vis = dims.get("ai_visibility", {})
+
+    if not ai_vis:
+        st.info("AI Visibility data not available.")
+        return
+
+    score = ai_vis.get("score", 0)
+    color = "#22c55e" if score >= 70 else "#f59e0b" if score >= 40 else "#ef4444"
+
+    # Big score at top
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        st.markdown(f"""<div class="metric-box" style="margin-bottom: 8px;">
+            <div class="metric-value" style="color:{color}; font-size:48px;">{score}</div>
+            <div class="metric-label">AI Visibility Score</div>
+        </div>""", unsafe_allow_html=True)
+    with col2:
+        st.markdown("""
+        **What this checks:**
+        - 🤖 Which AI bots (ChatGPT, Claude, Perplexity, Gemini) can access your site via robots.txt
+        - 🏷️ Schema.org types present — how well AI understands your content
+        - 📝 Content structure — how easily AI can extract and cite your information
+        """)
+
+    # Blocked bots section
+    robots_info = ai_vis.get("robots_info", {})
+    blocked = robots_info.get("blocked_bots", [])
+    has_robots = robots_info.get("has_robots_txt", False)
+
+    if blocked:
+        st.markdown("### 🚫 Blocked AI Bots")
+        for bot in blocked:
+            st.markdown(f"🔴 **{bot['name']}** — {bot['label']}")
+        st.caption("These bots cannot crawl your site. Update your robots.txt to allow them.")
+    elif has_robots:
+        st.markdown("### ✅ All AI Bots Allowed")
+        st.caption("Your robots.txt doesn't block major AI crawlers. Good.")
+
+    if not has_robots:
+        st.markdown("### ⚠️ No robots.txt Found")
+        st.caption("Without robots.txt, AI bots default to allowed — but you lose control. Consider adding one.")
+
+    # Issues and passes (filtered to AI visibility)
+    all_issues = ai_vis.get("issues", [])
+    all_passes = ai_vis.get("passes", [])
+
+    if all_issues:
+        st.markdown("### 🔧 Issues Found")
+        for issue in all_issues:
+            emoji = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(issue["severity"], "⚪")
+            st.markdown(f"{emoji} **{issue['check']}** — {issue['detail']}")
+    if all_passes:
+        st.markdown("### ✅ What's Working")
         for p in all_passes:
             st.markdown(f"✅ {p}")

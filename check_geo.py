@@ -3,8 +3,10 @@
 import re
 from urllib.parse import urlparse
 
+from crawler import fetch_robots_txt, extract_schema_types, AI_BOTS, IMPORTANT_SCHEMA_TYPES
 
-def check_geo(pages):
+
+def check_geo(pages, html=None, url=None):
     """Analyze how well a site is optimized for generative AI search engines
     (Google AI Overviews, ChatGPT, Claude, Gemini, Perplexity).
 
@@ -30,16 +32,18 @@ def check_geo(pages):
         "citation_readiness": _check_citation_readiness(all_text),
         "multimedia": _check_multimedia(pages),
         "external_references": _check_external_references(all_links, all_text),
+        "ai_visibility": _check_ai_visibility(pages, html, url),
     }
 
     weights = {
-        "brand_authority": 15,
-        "structured_data": 20,
-        "freshness": 10,
-        "topical_depth": 25,
-        "citation_readiness": 15,
-        "multimedia": 10,
+        "brand_authority": 10,
+        "structured_data": 15,
+        "freshness": 5,
+        "topical_depth": 15,
+        "citation_readiness": 10,
+        "multimedia": 5,
         "external_references": 5,
+        "ai_visibility": 35,
     }
 
     weighted_score = sum(
@@ -636,6 +640,225 @@ def _check_external_references(all_links, all_text):
         })
 
     return {"score": min(100, score), "issues": issues, "passes": passes}
+
+
+# ── Dimension 8: AI Visibility ──────────────────────────────────
+
+def _check_ai_visibility(pages, html=None, url=None):
+    """Check how visible the site is to AI crawlers and how well it's structured for AI citation.
+
+    This is the moat feature — nobody else does this properly.
+
+    Checks:
+    - robots.txt AI bot access (which bots are allowed/blocked)
+    - Schema types present (does it have the right schema for AI understanding?)
+    - Content structure quality (is the content easy for AI to extract?)
+    """
+    issues = []
+    passes = []
+    score = 20
+
+    robots_info = None
+    schema_types = {}
+
+    # Fetch robots.txt if we have a URL
+    if url:
+        robots_info = fetch_robots_txt(url)
+
+    # Extract schema types from the homepage HTML
+    if html:
+        schema_types = extract_schema_types(html)
+    elif pages and len(pages) > 0:
+        # Fallback — we don't have raw HTML in the page dicts, but we can check has_schema
+        pass
+
+    # ── 1. Robots.txt AI Bot Access ──────────────────────────────
+    if robots_info and robots_info.get("has_robots_txt"):
+        passes.append("robots.txt found — AI crawlers can check access rules.")
+
+        ai_bots = robots_info.get("ai_bots", {})
+        blocked_bots = []
+        allowed_bots = []
+        no_rules_bots = []
+
+        for bot_name, bot_data in ai_bots.items():
+            # Skip wildcard — it's not an actual bot name, it's a catch-all
+            if bot_name == "*":
+                continue
+            inherited = bot_data.get("inherited_from_wildcard", False)
+            blocked = not bot_data.get("allowed", True)
+
+            if blocked:
+                blocked_bots.append(bot_name)
+            elif inherited:
+                no_rules_bots.append(bot_name)
+            else:
+                allowed_bots.append(bot_name)
+
+        # Score based on how many AI bots have access
+        total_bots = len([k for k in ai_bots if k != "*"])
+        allowed_count = len(allowed_bots) + len(no_rules_bots)  # no rules = allowed by default
+
+        if total_bots > 0:
+            access_ratio = allowed_count / total_bots
+            if access_ratio >= 0.9:
+                passes.append(f"AI crawler access: {allowed_count}/{total_bots} bots allowed — excellent.")
+                score += 25
+            elif access_ratio >= 0.7:
+                passes.append(f"AI crawler access: {allowed_count}/{total_bots} bots allowed — good.")
+                score += 15
+            elif access_ratio >= 0.5:
+                issues.append({
+                    "severity": "warning",
+                    "check": f"AI crawler access: {allowed_count}/{total_bots} bots allowed",
+                    "detail": f"Blocked bots: {', '.join(blocked_bots)}. AI engines can't cite what they can't crawl."
+                })
+                score += 5
+            else:
+                issues.append({
+                    "severity": "critical",
+                    "check": f"AI crawler access severely restricted ({allowed_count}/{total_bots})",
+                    "detail": f"Blocked bots: {', '.join(blocked_bots)}. Your site is invisible to most AI search engines."
+                })
+
+        if blocked_bots:
+            blocked_detail = ", ".join(
+                f"{b} ({AI_BOTS.get(b, 'unknown')})" for b in blocked_bots[:5]
+            )
+            if len(blocked_bots) > 5:
+                blocked_detail += f" and {len(blocked_bots) - 5} more"
+            issues.append({
+                "severity": "warning",
+                "check": f"{len(blocked_bots)} AI bot(s) blocked in robots.txt",
+                "detail": f"Blocked: {blocked_detail}. These AI engines cannot crawl or cite your content."
+            })
+
+        if no_rules_bots:
+            passes.append(f"{len(no_rules_bots)} AI bots have no specific rules (inherit wildcard defaults).")
+
+    else:
+        # No robots.txt — all bots are allowed by default
+        if robots_info and robots_info.get("error"):
+            issues.append({
+                "severity": "info",
+                "check": f"Could not fetch robots.txt: {robots_info['error']}",
+                "detail": "Unable to verify AI bot access. All bots default to allowed."
+            })
+            score += 10
+        else:
+            passes.append("No robots.txt found — all AI bots can crawl by default.")
+            score += 15
+
+    # ── 2. Schema Type Coverage ───────────────────────────────────
+    if schema_types:
+        found_types = set(schema_types.keys())
+        important_found = [t for t in IMPORTANT_SCHEMA_TYPES if t in found_types]
+        missing = [t for t in IMPORTANT_SCHEMA_TYPES if t not in found_types]
+
+        if important_found:
+            passes.append(f"Schema types found: {', '.join(important_found[:8])}")
+            if len(important_found) >= 5:
+                passes.append(f"Rich schema coverage ({len(important_found)} important types) — excellent for AI understanding.")
+                score += 20
+            elif len(important_found) >= 3:
+                passes.append(f"Good schema coverage ({len(important_found)} important types).")
+                score += 10
+            else:
+                passes.append(f"Basic schema coverage ({len(important_found)} important types).")
+                score += 5
+
+        # Highlight key missing types
+        high_value_types = ["FAQPage", "HowTo", "Product", "Organization", "LocalBusiness"]
+        missing_high_value = [t for t in high_value_types if t in missing]
+        if missing_high_value:
+            issues.append({
+                "severity": "info",
+                "check": f"Missing high-value schema types: {', '.join(missing_high_value)}",
+                "detail": "FAQPage and HowTo schema directly influence AI-generated answers. Add them to increase citation likelihood."
+            })
+    else:
+        # Check if pages have schema at all
+        has_any_schema = any(p.get("has_schema") for p in pages if isinstance(p, dict))
+        if has_any_schema:
+            issues.append({
+                "severity": "warning",
+                "check": "Schema detected but types could not be identified",
+                "detail": "Verify schema markup is valid JSON-LD with proper @type fields."
+            })
+        else:
+            issues.append({
+                "severity": "critical",
+                "check": "No structured data (schema.org) found",
+                "detail": "Schema markup is how AI search engines understand your content. Add JSON-LD with relevant types."
+            })
+
+    # ── 3. Content Structure for AI Extraction ────────────────────
+    all_text = _get_all_text(pages) if pages else ""
+
+    # Check for clear Q&A structure (FAQ sections)
+    qa_patterns = [
+        r"What is", r"How (to|do|can)", r"Why (do|is|are|does|should)",
+        r"When (do|is|does|should)", r"Where (do|is|can|does)",
+        r"FAQ", r"frequently asked", r"Q:", r"A:",
+    ]
+    qa_count = sum(len(re.findall(p, all_text, re.IGNORECASE)) for p in qa_patterns)
+    if qa_count >= 5:
+        passes.append(f"Q&A content detected ({qa_count} instances) — highly extractable by AI.")
+        score += 15
+    elif qa_count >= 2:
+        passes.append("Some Q&A-style content found.")
+        score += 5
+    else:
+        issues.append({
+            "severity": "info",
+            "check": "No Q&A structured content detected",
+            "detail": "Q&A format is the most AI-friendly content structure. Consider adding FAQ sections."
+        })
+
+    # Check for clear definition sentences (AI loves these)
+    definition_pattern = r"[A-Z][a-z]+ (?:(?:is|are|refers to|means) [a-z]|[a-z]+ that [a-z])"
+    def_count = len(re.findall(definition_pattern, all_text))
+    if def_count >= 3:
+        passes.append(f"Clear definition statements ({def_count}) — easily quoted by AI.")
+        score += 10
+    elif def_count >= 1:
+        score += 5
+
+    # Check for lists (numbered, bulleted — AI extractable)
+    list_patterns = [r"^\s*[\-\*]\s", r"^\s*\d+\.\s"]
+    list_count = sum(len(re.findall(p, all_text, re.MULTILINE)) for p in list_patterns)
+    if list_count >= 5:
+        passes.append(f"List-structured content ({list_count} items) — easy for AI to parse.")
+        score += 10
+    elif list_count >= 2:
+        passes.append("Some list-structured content.")
+        score += 5
+    else:
+        issues.append({
+            "severity": "info",
+            "check": "Few lists or bullet points",
+            "detail": "AI models extract list items easily for answer snippets. Use bullet points and numbered lists."
+        })
+
+    # Check word count threshold
+    total_words = sum(p.get("word_count", 0) for p in pages) if pages else 0
+    if total_words >= 2000:
+        passes.append(f"Substantial content ({total_words} words) — enough for AI to extract meaningful answers.")
+        score += 5
+
+    return {
+        "score": min(100, score),
+        "issues": issues,
+        "passes": passes,
+        "robots_info": {
+            "has_robots_txt": robots_info.get("has_robots_txt") if robots_info else False,
+            "blocked_bots": [
+                {"name": k, "label": v["label"]}
+                for k, v in (robots_info.get("ai_bots", {}) if robots_info else {}).items()
+                if not v.get("allowed", True) and k != "*"
+            ],
+        } if robots_info else {"has_robots_txt": False, "blocked_bots": []},
+    }
 
 
 # ── Summary Builder ──────────────────────────────────────────────
