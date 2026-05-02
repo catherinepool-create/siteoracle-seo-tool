@@ -145,9 +145,12 @@ with tab_analyze:
     with col1:
         run_btn = st.button("🔍 Analyze", type="primary", use_container_width=True)
     with col2:
-        demo_btn = st.button("👀 Try Sample Report", use_container_width=True)
-        screenshot_file = st.file_uploader("Or upload screenshot", type=["png", "jpg", "jpeg", "webp"],
-                                            label_visibility="collapsed")
+        demo_btn = st.button("👀 Try Sample Report", use_container_width=True,
+                             help="See a live demo report without scanning")
+
+    screenshot_file = st.file_uploader("Or upload screenshot for AI analysis",
+                                        type=["png", "jpg", "jpeg", "webp"],
+                                        help="Can't crawl a site? Upload a screenshot instead.")
 
     if screenshot_file:
         ext = screenshot_file.name.rsplit(".", 1)[-1]
