@@ -428,8 +428,39 @@ with tab_analyze:
             """, unsafe_allow_html=True)
             st.stop()
 
-    elif demo_btn:
-        # ── Demo Mode — show a pre-loaded sample report ──
+        # ── React to sample report being shown previously ──
+        if demo_btn:
+            st.rerun()
+
+        # ── Crawl & analyze ──
+        with st.status("🔍 Crawling site...") as status:
+            try:
+                pages = crawl(url, max_pages=max_pages)
+                if not pages:
+                    st.error("Could not fetch the website. Check the URL and try again.")
+                    st.stop()
+                status.update(label=f"✅ Crawled {len(pages)} pages", state="complete")
+            except Exception as e:
+                st.error(f"Crawl failed: {e}")
+                st.stop()
+
+        # Also fetch homepage raw HTML for schema analysis
+        homepage_html, _ = fetch_page(url)
+
+        # ── Run Checks ──
+        with st.status("Running checks...") as status:
+            seo = check_technical_seo(pages)
+            status.update(label="✅ Technical SEO done")
+
+            aeo = check_aeo(pages)
+            status.update(label="✅ AEO done")
+
+            geo = check_geo(pages, html=homepage_html, url=url)
+            status.update(label="✅ GEO + AI Visibility done")
+
+            biz_info = {"name": biz_name} if biz_name else None
+            gbp = check_gbp(pages, biz_info)
+            status.update(label="✅ GBP done")
         st.markdown("### 👀 Sample Report — squadconsole.com")
         st.caption("This is a demo showing what SiteOracle finds. No crawl needed.")
 
@@ -565,221 +596,6 @@ with tab_analyze:
         # Report download
         st.markdown("---")
         st.markdown("### 📄 Run a real scan to download your report")
-
-    # ── Crawl & analyze ──
-    elif run_btn and url:
-        with st.status("🔍 Crawling site...") as status:
-            pages = crawl(url, max_pages=max_pages)
-            if not pages:
-                st.error("Could not fetch the website. Check the URL and try again.")
-                st.stop()
-            status.update(label=f"✅ Crawled {len(pages)} pages", state="complete")
-
-        # Also fetch homepage raw HTML for schema analysis
-        homepage_html, _ = fetch_page(url)
-
-        # ── Run Checks ──
-        with st.status("Running checks...") as status:
-            seo = check_technical_seo(pages)
-            status.update(label="✅ Technical SEO done")
-
-            aeo = check_aeo(pages)
-            status.update(label="✅ AEO done")
-
-            geo = check_geo(pages, html=homepage_html, url=url)
-            status.update(label="✅ GEO + AI Visibility done")
-
-            biz_info = {"name": biz_name} if biz_name else None
-            gbp = check_gbp(pages, biz_info)
-            status.update(label="✅ GBP done")
-
-        # ── AI Analysis (Pro feature) ──
-        ai_text = ""
-        if use_ai:
-            if not _is_pro_user():
-                ai_text = ""  # skip — shown as upgrade prompt below
-            else:
-                deepseek_key = os.getenv("DEEPSEEK_API_KEY")
-                if deepseek_key:
-                    with st.spinner("Running AI analysis..."):
-                        try:
-                            ai_text = analyze_site(pages, engine="deepseek")
-                        except Exception as e:
-                            st.warning(f"AI analysis failed: {e}")
-                            ai_text = ""
-                else:
-                    st.info("AI analysis unavailable — server configuration issue. Results still show below.")
-
-        # ── Display Scores ──
-        # Extract AI Visibility score from GEO dimensions if available
-        ai_vis_score = geo.get("dimensions", {}).get("ai_visibility", {}).get("score", 0)
-        # Combined: SEO 25%, AEO 20%, GEO (incl AI Vis) 30%, GBP 10%, AI Visibility standalone 15%
-        combined = round(
-            seo["score"] * 0.20 +
-            aeo["score"] * 0.15 +
-            geo["score"] * 0.25 +
-            gbp["score"] * 0.10 +
-            ai_vis_score * 0.30
-        )
-
-        s_c, a_c, g_c, gbp_c, ai_c, comb_c = st.columns(6)
-        with s_c:
-            color = "#22c55e" if seo["score"] >= 70 else "#f59e0b" if seo["score"] >= 40 else "#ef4444"
-            st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:{color}">{seo["score"]}</div><div class="metric-label">Technical SEO</div></div>""", unsafe_allow_html=True)
-        with a_c:
-            color = "#22c55e" if aeo["score"] >= 70 else "#f59e0b" if aeo["score"] >= 40 else "#ef4444"
-            st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:{color}">{aeo["score"]}</div><div class="metric-label">AEO</div></div>""", unsafe_allow_html=True)
-        with g_c:
-            color = "#22c55e" if geo["score"] >= 70 else "#f59e0b" if geo["score"] >= 40 else "#ef4444"
-            st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:{color}">{geo["score"]}</div><div class="metric-label">GEO</div></div>""", unsafe_allow_html=True)
-        with gbp_c:
-            color = "#22c55e" if gbp["score"] >= 70 else "#f59e0b" if gbp["score"] >= 40 else "#ef4444"
-            st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:{color}">{gbp["score"]}</div><div class="metric-label">GBP</div></div>""", unsafe_allow_html=True)
-        with ai_c:
-            color = "#22c55e" if ai_vis_score >= 70 else "#f59e0b" if ai_vis_score >= 40 else "#ef4444"
-            st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:{color}">{ai_vis_score}</div><div class="metric-label">AI Visibility</div></div>""", unsafe_allow_html=True)
-        with comb_c:
-            color = "#22c55e" if combined >= 70 else "#f59e0b" if combined >= 40 else "#ef4444"
-            st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:{color}">{combined}</div><div class="metric-label">Combined</div></div>""", unsafe_allow_html=True)
-
-        # ── Priority Fix List ──
-        priority_list = _build_priority_fix_list(seo, aeo, geo, gbp)
-        if priority_list:
-            improvement = _estimate_improvement(priority_list)
-            expected = combined + improvement
-
-            st.markdown("### 🎯 Priority Fix List")
-            st.caption(f"Fix these {len(priority_list)} items to reach an estimated score of **{expected}/100** (+{improvement} pts)")
-
-            for item in priority_list:
-                sev = item["severity"]
-                emoji = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(sev, "⚪")
-                border = {"critical": "#ef4444", "warning": "#f59e0b", "info": "#3b82f6"}
-                st.markdown(f"""
-                <div style="display: flex; gap: 12px; padding: 12px; margin-bottom: 8px;
-                            background: #1e293b; border-radius: 8px; border-left: 4px solid {border[sev]};">
-                    <div style="flex-shrink: 0; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
-                                background: #0f172a; border-radius: 50%; font-weight: 700; font-size: 13px;">{item['priority']}</div>
-                    <div style="flex: 1;">
-                        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 2px;">
-                            <span style="font-size: 11px; font-weight: 700; color: {border[sev]};">{emoji} {sev.upper()}</span>
-                            <span style="font-size: 11px; color: #64748b; background: #0f172a; padding: 2px 8px; border-radius: 4px;">{item['area']}</span>
-                        </div>
-                        <div style="font-weight: 600; color: #f1f5f9; font-size: 14px;">{item['check']}</div>
-                        <div style="font-size: 13px; color: #94a3b8;">{item['detail']}</div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.success("✅ No issues found — your site is in great shape!")
-            expected = combined
-
-        # ── Record scan for free users (rate limiting) ──
-        if not _is_pro_user():
-            _record_scan()
-
-        # ── Detail Sections ──
-        with st.expander("🔧 Technical SEO Details", expanded=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                for issue in seo.get("issues", []):
-                    emoji = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(issue["severity"], "⚪")
-                    st.markdown(f"{emoji} **{issue['check']}**")
-                    st.caption(issue["detail"])
-            with col2:
-                for p in seo.get("passes", []):
-                    st.markdown(f"✅ {p}")
-
-        with st.expander("📝 Answer Engine Optimization (AEO)"):
-            _show_dimensions(aeo)
-
-        with st.expander("🤖 AI Visibility — Can AI Bots See Your Site?", expanded=True):
-            _show_ai_visibility(geo)
-
-        with st.expander("🤖 Generative Engine Optimization (GEO)"):
-            _show_dimensions(geo)
-
-        with st.expander("📍 Google Business Profile Alignment"):
-            _show_dimensions(gbp)
-            if gbp.get("business_info_extracted"):
-                info = gbp["business_info_extracted"]
-                parts = [f"**{k}:** {v}" for k, v in info.items() if v]
-                if parts:
-                    st.markdown("Auto-detected: " + " · ".join(parts))
-
-        # ── AI Analysis ──
-        if ai_text:
-            with st.expander("🤖 AI Deep Analysis", expanded=True):
-                st.markdown(ai_text)
-        elif use_ai and not _is_pro_user():
-            with st.expander("🤖 AI Deep Analysis — Pro Feature"):
-                render_upgrade_card("AI Deep Analysis")
-
-        # ── Report Download ──
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            html = generate_html_report(url, pages, seo, aeo, geo, gbp, ai_text)
-            report_filename_base = f"siteoracle_{url.replace('https://', '').replace('/', '_')[:30]}"
-            st.download_button(
-                "📄 Download HTML Report",
-                html,
-                file_name=f"{report_filename_base}.html",
-                mime="text/html",
-                use_container_width=True,
-            )
-        with col2:
-            text = generate_report(url, pages, seo, aeo, geo, gbp, ai_text)
-            st.download_button(
-                "📝 Download Text Report",
-                text,
-                file_name=f"{report_filename_base}.txt",
-                mime="text/plain",
-                use_container_width=True,
-            )
-        with col3:
-            with st.spinner("Generating PDF..."):
-                pdf_bytes = generate_pdf_report(url, pages, seo, aeo, geo, gbp, ai_text)
-            if pdf_bytes:
-                st.download_button(
-                    "📕 Download PDF Report",
-                    pdf_bytes,
-                    file_name=f"{report_filename_base}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                )
-            else:
-                st.button("📕 PDF (unavailable)", disabled=True, use_container_width=True)
-
-        # ── Upgrade Prompt ──
-        # Find best and worst dimensions for personalization
-        dim_names = {
-            "seo_score": ("SEO", seo["score"]),
-            "aeo_score": ("AEO", aeo["score"]),
-            "geo_score": ("GEO", geo["score"]),
-            "gbp_score": ("GBP", gbp["score"]),
-        }
-        worst_dim = min(dim_names.values(), key=lambda x: x[1])
-        best_dim = max(dim_names.values(), key=lambda x: x[1])
-
-        # ── Upgrade prompt (only for free users) ──
-        if not _is_pro_user():
-            st.markdown(f"""
-            <div class="upgrade-card">
-                <h2>🚀 Your site scored {combined}/100</h2>
-                <p><strong>{worst_dim[0]}</strong> is your weakest area ({worst_dim[1]}/100).<br>
-                Upgrade to unlock unlimited scans, AI deep analysis, competitor comparison, monitoring and PDF reports.</p>
-                <a href="{STRIPE_LINK_PRO}" target="_blank"
-                   style="display:inline-block; background:#ff5555; color:white; padding:10px 24px;
-                          border-radius:8px; text-decoration:none; font-weight:700; margin-top:8px;">
-                    ⚡ Get Pro — $49/mo
-                </a>
-            </div>
-            """, unsafe_allow_html=True)
-
-        # ── Offer Monitoring (Pro feature) ──
-        if not _is_pro_user():
-            if st.button("📊 Start Monitoring This Site (Pro)", use_container_width=True):
-                st.info("Log in with your Pro account email in the sidebar to unlock monitoring.")
 
 
 # ══════════════════════════════════════════════════════════════════
