@@ -629,22 +629,22 @@ with tab_settings:
 
     with st.expander("🔑 Bring Your Own API Key (Optional)"):
         st.markdown("""
-        Provide your own API key to use alternative AI engines.  
+        Optionally use your own API key to run AI deep analysis with a specific engine.
         SiteOracle uses DeepSeek by default — no key required for basic scans.
         """)
 
-        keys = {
-            "DEEPSEEK_API_KEY": os.getenv("DEEPSEEK_API_KEY", ""),
-            "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY", ""),
-            "ANTHROPIC_API_KEY": os.getenv("ANTHROPIC_API_KEY", ""),
-        }
+        key_names = ["DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+        for name in key_names:
+            server_has_key = bool(os.getenv(name, ""))
+            label = f"{name} {'✅ set by server' if server_has_key else ''}"
+            user_val = st.session_state.get(f"user_{name}", "")
+            entered = st.text_input(label, value=user_val, type="password",
+                                    placeholder="Paste your key here to override" if server_has_key else "Paste your key here",
+                                    key=f"input_{name}")
+            if entered:
+                st.session_state[f"user_{name}"] = entered
 
-        for name, val in keys.items():
-            masked = val[:8] + "..." + val[-4:] if len(val) > 12 else ("<not set>" if not val else val)
-            st.text_input(name, value=val, type="password",
-                          help=f"Current: {masked}")
-
-        st.caption("⚠️ Keys set here override default behavior. If you remove them, DeepSeek defaults resume.")
+        st.caption("Your keys are only used for this session and never stored on our servers.")
 
     st.markdown("---")
     st.markdown("""
