@@ -295,8 +295,12 @@ st.markdown("""
 # ── Sidebar Auth ────────────────────────────────────────────────
 render_sidebar_auth()
 
-# ── HERO SECTION ─────────────────────────────────────────────────
-st.markdown("""
+# ── Detect embedded mode (iframe on squadconsole.com) ──
+_embedded = st.query_params.get("embedded", False)
+
+# ── HERO SECTION (hidden when embedded in squadconsole.com iframe) ──
+if not _embedded:
+    st.markdown("""
 <div class="hero">
     <h1>Which AI bots can read your website?</h1>
     <p class="tagline">SiteOracle scans your site — technical SEO, AI visibility, answer engines, and local search — and tells you exactly what to fix.</p>
@@ -310,8 +314,8 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ── Feature Grid ──
-st.markdown("""
+    # ── Feature Grid ──
+    st.markdown("""
 <div class="feature-grid">
     <div class="feature-card">
         <div class="emoji">🤖</div>
@@ -336,8 +340,8 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ── Quick Stats / Social Proof ──
-st.markdown("""
+    # ── Quick Stats / Social Proof ──
+    st.markdown("""
 <div class="proof-row">
     <div class="proof-item"><div class="num">50+</div><div class="label">Checks Per Site</div></div>
     <div class="proof-item"><div class="num">4</div><div class="label">Dimensions Scored</div></div>
@@ -345,7 +349,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
+    st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
 # ── Tabs ────────────────────────────────────────────────────────
 tab_analyze, tab_compare, tab_monitor, tab_settings = st.tabs([
