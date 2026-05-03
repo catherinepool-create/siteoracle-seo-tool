@@ -311,6 +311,13 @@ def generate_html_report(url, pages, seo_results, aeo_results, geo_results, gbp_
 
     expected = f"{combined + improvement}" if improvement > 0 else str(combined)
 
+    # ── Open Graph / social description ──
+    aeo_score = aeo_results.get("score", 0) if aeo_results else 0
+    geo_score = geo_results.get("score", 0) if geo_results else 0
+    gbp_score = gbp_results.get("score", 0) if gbp_results else 0
+    og_title = f"SiteOracle: {url} scored {combined}/100"
+    og_desc = f"SEO {score} | AEO {aeo_score} | GEO {geo_score} | GBP {gbp_score} | AI Visibility {ai_vis_score}. Priority fixes: {fix_count} items to unlock +{improvement} pts."
+
     replacements = {
         "{{TITLE}}": f"SiteOracle Report — {url}",
         "{{URL}}": url,
@@ -343,6 +350,11 @@ def generate_html_report(url, pages, seo_results, aeo_results, geo_results, gbp_
         "{{COMBINED_COLOR}}": combined_color,
         "{{SEV_SUMMARY}}": sev_summary_str,
         "{{AI_VIS_SCORE}}": str(ai_vis_score),
+        "{{OG_TITLE}}": og_title,
+        "{{OG_DESCRIPTION}}": og_desc,
+        "{{AEO_SCORE}}": str(aeo_score),
+        "{{GEO_SCORE}}": str(geo_score),
+        "{{GBP_SCORE}}": str(gbp_score),
     }
 
     for key, val in replacements.items():

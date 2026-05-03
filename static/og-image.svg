@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#070b14"/>
+      <stop offset="100%" style="stop-color:#0f1525"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#4338ca"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect x="60" y="60" width="1080" height="510" rx="24" fill="none" stroke="#1e293b" stroke-width="2"/>
+  <text x="600" y="220" text-anchor="middle" font-size="64" font-family="system-ui,-apple-system,sans-serif" font-weight="800" fill="#f1f5f9">SiteOracle</text>
+  <text x="600" y="290" text-anchor="middle" font-size="28" font-family="system-ui,-apple-system,sans-serif" fill="#94a3b8">SEO · AEO · GEO · GBP · AI Visibility</text>
+  <rect x="360" y="340" width="480" height="80" rx="40" fill="url(#accent)"/>
+  <text x="600" y="394" text-anchor="middle" font-size="28" font-family="system-ui,-apple-system,sans-serif" font-weight="700" fill="white">Website Analysis Report</text>
+  <text x="600" y="460" text-anchor="middle" font-size="18" font-family="system-ui,-apple-system,sans-serif" fill="#64748b">siteoracle.app</text>
+</svg>

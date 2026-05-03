@@ -20,7 +20,7 @@ from auth import render_sidebar_auth, is_pro_or_above, is_agency, get_user_plan,
 
 st.set_page_config(
     page_title="SiteOracle",
-    page_icon="/static/favicon.svg",
+    page_icon="🔍",
     layout="wide",
 )
 
@@ -58,7 +58,7 @@ def _check_rate_limit():
 
     if client_id in limits:
         entry = limits[client_id]
-        if entry.get("date") == today and entry.get("count", 0) >= 1:
+        if entry.get("date") == today and entry.get("count", 0) >= 3:
             return False
     return True
 
@@ -67,24 +67,205 @@ def _is_pro_user():
     return is_pro_or_above()
 
 def _record_scan():
-    """Record a free scan for this client."""
+    """Record a free scan for this client — increments counter for today."""
     client_id = _get_client_id()
     limits = _load_rate_limits()
     today = datetime.date.today().isoformat()
-    limits[client_id] = {"date": today, "count": 1}
+    current = limits.get(client_id, {})
+    if current.get("date") == today:
+        limits[client_id] = {"date": today, "count": current["count"] + 1}
+    else:
+        limits[client_id] = {"date": today, "count": 1}
     _save_rate_limits(limits)
 
 # ── CSS ──────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    .main { padding: 1rem; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+    * { font-family: 'Inter', -apple-system, sans-serif; }
+
+    .main { padding: 0 1rem 2rem 1rem; }
+
+    /* ── Brand Colors ── */
+    :root {
+        --brand: #6366f1;
+        --brand-glow: #818cf8;
+        --brand-dark: #4338ca;
+        --accent: #f59e0b;
+        --bg-deep: #070b14;
+        --bg-card: #0f1525;
+        --bg-card-hover: #151d33;
+        --text-primary: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --text-muted: #64748b;
+        --border-subtle: #1e293b;
+    }
+
+    /* ── Hero Section ── */
+    .hero {
+        text-align: center;
+        padding: 3rem 1rem 2rem 1rem;
+        position: relative;
+    }
+    .hero h1 {
+        font-size: 42px;
+        font-weight: 800;
+        letter-spacing: -1.5px;
+        line-height: 1.15;
+        margin-bottom: 12px;
+        background: linear-gradient(135deg, #f1f5f9 0%, #818cf8 50%, #6366f1 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    .hero .tagline {
+        font-size: 18px;
+        color: var(--text-secondary);
+        max-width: 600px;
+        margin: 0 auto 6px auto;
+        line-height: 1.5;
+    }
+    .hero .sub-tagline {
+        font-size: 14px;
+        color: var(--text-muted);
+        max-width: 540px;
+        margin: 0 auto 24px auto;
+    }
+    .hero .badge-row {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        flex-wrap: wrap;
+        margin-top: 8px;
+        margin-bottom: 28px;
+    }
+    .hero .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 14px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        background: rgba(99, 102, 241, 0.12);
+        color: var(--brand-glow);
+        border: 1px solid rgba(99, 102, 241, 0.2);
+    }
+
+    /* ── Scan Bar ── */
+    .scan-bar {
+        background: var(--bg-card);
+        border: 1px solid var(--border-subtle);
+        border-radius: 16px;
+        padding: 20px 24px;
+        max-width: 780px;
+        margin: 0 auto 20px auto;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+    }
+    .scan-bar input {
+        flex: 1;
+        background: var(--bg-deep);
+        border: 1px solid var(--border-subtle);
+        border-radius: 10px;
+        padding: 12px 16px;
+        font-size: 15px;
+        color: var(--text-primary);
+        outline: none;
+    }
+    .scan-bar input:focus {
+        border-color: var(--brand);
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+    }
+    .scan-bar button {
+        background: linear-gradient(135deg, var(--brand), var(--brand-dark));
+        color: white;
+        border: none;
+        border-radius: 10px;
+        padding: 12px 28px;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.15s;
+    }
+    .scan-bar button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 20px rgba(99, 102, 241, 0.35);
+    }
+
+    /* ── Social Proof Row ── */
+    .proof-row {
+        display: flex;
+        gap: 24px;
+        justify-content: center;
+        align-items: center;
+        flex-wrap: wrap;
+        margin: 16px 0 0 0;
+        padding: 16px 0;
+    }
+    .proof-item {
+        text-align: center;
+    }
+    .proof-item .num {
+        font-size: 28px;
+        font-weight: 800;
+        color: var(--text-primary);
+        line-height: 1;
+    }
+    .proof-item .label {
+        font-size: 12px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-top: 2px;
+    }
+
+    /* ── Feature Grid ── */
+    .feature-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 12px;
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 0 8px;
+    }
+    .feature-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-subtle);
+        border-radius: 12px;
+        padding: 20px;
+        text-align: center;
+        transition: all 0.15s;
+    }
+    .feature-card:hover {
+        background: var(--bg-card-hover);
+        border-color: rgba(99, 102, 241, 0.25);
+    }
+    .feature-card .emoji { font-size: 28px; margin-bottom: 6px; }
+    .feature-card .name { font-size: 14px; font-weight: 700; color: var(--text-primary); margin-bottom: 2px; }
+    .feature-card .desc { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
+
+    /* ── Section Divider ── */
+    .section-divider {
+        border: none;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, var(--border-subtle), transparent);
+        margin: 24px 0;
+    }
+
+    /* ── Existing styles (preserved) ── */
     h1, h2, h3 { color: inherit !important; }
     .stTabs [data-baseweb="tab-list"] { gap: 4px; padding: 4px; border-radius: 10px; }
     .stTabs [data-baseweb="tab"] { border-radius: 8px; padding: 8px 16px; }
-    .metric-box { text-align: center; padding: 1rem; border-radius: 10px; margin-bottom: 0.5rem; }
+    .stTabs { margin-top: 12px; }
+    .metric-box { text-align: center; padding: 1rem; border-radius: 10px; margin-bottom: 0.5rem; background: var(--bg-card); border: 1px solid var(--border-subtle); }
     .metric-value { font-size: 32px; font-weight: 700; }
-    .metric-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; }
+    .metric-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-secondary); }
     .stButton button { width: 100%; }
+    .st-emotion-cache-1gulkj5, .st-emotion-cache-1r4qj8v { width: 100%; }
     .streamlit-expanderContent { font-size: 14px; }
     .stDownloadButton button { width: 100%; }
     div[data-testid="stStatusWidget"] { color: inherit; }
@@ -99,20 +280,72 @@ st.markdown("""
     }
     .upgrade-card h2 { color: #ff5555 !important; margin-bottom: 0.5rem; }
     .upgrade-card p { color: #94a3b8; margin-bottom: 1.5rem; }
+
+    /* Streamlit overrides */
+    .stTextInput input { background: var(--bg-deep) !important; border: 1px solid var(--border-subtle) !important; color: var(--text-primary) !important; border-radius: 10px !important; }
+    .stTextInput input:focus { border-color: var(--brand) !important; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15) !important; }
+    .stSlider div[data-baseweb="slider"] { margin-top: 8px; }
+    .stSlider [data-testid="stTickBar"] { color: var(--text-muted); }
+    .stCheckbox label { color: var(--text-primary) !important; }
+    .element-container { margin-bottom: 0 !important; }
+    div[data-testid="stImage"] { margin-bottom: 12px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Sidebar Auth ────────────────────────────────────────────────
 render_sidebar_auth()
 
-# ── Header ──────────────────────────────────────────────────────
-col1, col2 = st.columns([3, 1])
-with col1:
-    st.title("🔍 SiteOracle")
-    st.markdown("**SEO + AEO + GEO + GBP** — comprehensive website analysis")
-with col2:
-    st.markdown("")
-    st.markdown(f"<div style='text-align:right; font-size:12px; color:#94a3b8;'>{datetime.datetime.now().strftime('%b %d, %Y')}</div>", unsafe_allow_html=True)
+# ── HERO SECTION ─────────────────────────────────────────────────
+st.markdown("""
+<div class="hero">
+    <h1>Which AI bots can read your website?</h1>
+    <p class="tagline">SiteOracle scans your site — technical SEO, AI visibility, answer engines, and local search — and tells you exactly what to fix.</p>
+    <p class="sub-tagline">No account needed. Enter any URL and get a scored report in under a minute.</p>
+    <div class="badge-row">
+        <span class="badge">🔧 Technical SEO</span>
+        <span class="badge">🤖 AI Visibility</span>
+        <span class="badge">📝 Answer Engines</span>
+        <span class="badge">📍 Local Search</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ── Feature Grid ──
+st.markdown("""
+<div class="feature-grid">
+    <div class="feature-card">
+        <div class="emoji">🤖</div>
+        <div class="name">AI Visibility</div>
+        <div class="desc">Which AI bots (ChatGPT, Claude, Perplexity, Gemini) can crawl your site — and which you're blocking.</div>
+    </div>
+    <div class="feature-card">
+        <div class="emoji">📈</div>
+        <div class="name">Combined Score</div>
+        <div class="desc">SEO × AEO × GEO × GBP scored together with a priority fix list to improve.</div>
+    </div>
+    <div class="feature-card">
+        <div class="emoji">⚡</div>
+        <div class="name">Rules + AI</div>
+        <div class="desc">50+ rules-based checks run instantly. Optional AI deep analysis adds personalized recommendations.</div>
+    </div>
+    <div class="feature-card">
+        <div class="emoji">📄</div>
+        <div class="name">PDF Reports</div>
+        <div class="desc">Download HTML, text, or PDF reports — share them with clients or your team.</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ── Quick Stats / Social Proof ──
+st.markdown("""
+<div class="proof-row">
+    <div class="proof-item"><div class="num">50+</div><div class="label">Checks Per Site</div></div>
+    <div class="proof-item"><div class="num">4</div><div class="label">Dimensions Scored</div></div>
+    <div class="proof-item"><div class="num">8</div><div class="label">AI Bots Tracked</div></div>
+</div>
+""", unsafe_allow_html=True)
+
+st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
 # ── Tabs ────────────────────────────────────────────────────────
 tab_analyze, tab_compare, tab_monitor, tab_settings = st.tabs([
@@ -162,7 +395,7 @@ with tab_analyze:
 
         if st.button("📸 Analyze Screenshot", type="primary"):
             if not _check_rate_limit():
-                st.warning("You've used your free scan for today. You get 1 free scan every 24 hours — upgrade for unlimited access.")
+                st.warning("You've used your 3 free scans for today. You get 3 free scans every 24 hours — upgrade for unlimited access.")
             elif not os.getenv("OPENAI_API_KEY"):
                 st.warning("Screenshot analysis uses OpenAI Vision — set your key in Settings (Advanced) or upgrade to Pro for included access.")
             else:
@@ -177,7 +410,7 @@ with tab_analyze:
 
         # ── Rate limit check (Pro/Agency bypass) ──
         if not _is_pro_user() and not _check_rate_limit():
-            st.warning("You've used your free scan for today. You get 1 free scan every 24 hours.")
+            st.warning("You've used your 3 free scans for today. You get 3 free scans every 24 hours.")
             st.markdown(f"""
             <div class="upgrade-card">
                 <h2>🚀 Upgrade to SiteOracle Pro</h2>
