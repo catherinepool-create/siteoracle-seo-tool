@@ -16,6 +16,7 @@ from analyzer import analyze_site, analyze_screenshot
 from reporter import generate_report, generate_html_report, generate_pdf_report, _build_priority_fix_list, _estimate_improvement
 from comparison import compare_sites, generate_comparison_report
 from monitor import setup_monitor, load_monitors, save_snapshot, get_trend, generate_trend_report
+from auth import render_sidebar_auth, is_pro_or_above, is_agency, get_user_plan, render_upgrade_card, STRIPE_LINK_PRO, STRIPE_LINK_AGENCY
 
 st.set_page_config(
     page_title="SiteOracle",
@@ -62,10 +63,8 @@ def _check_rate_limit():
     return True
 
 def _is_pro_user():
-    """Simple check: if they've set an API key in session or env, they're 'pro'."""
-    # For now, this is a stub — we'll wire up real Stripe/account auth later.
-    # Returns True to bypass rate limits for testing.
-    return False
+    """Check if user has an active Pro or Agency subscription via Stripe."""
+    return is_pro_or_above()
 
 def _record_scan():
     """Record a free scan for this client."""
@@ -102,6 +101,9 @@ st.markdown("""
     .upgrade-card p { color: #94a3b8; margin-bottom: 1.5rem; }
 </style>
 """, unsafe_allow_html=True)
+
+# ── Sidebar Auth ────────────────────────────────────────────────
+render_sidebar_auth()
 
 # ── Header ──────────────────────────────────────────────────────
 col1, col2 = st.columns([3, 1])
@@ -173,13 +175,18 @@ with tab_analyze:
         if not url.startswith("http"):
             url = "https://" + url
 
-        # ── Rate limit check ──
-        if not _check_rate_limit():
-            st.warning("You've used your free scan for today. You get 1 free scan every 24 hours — upgrade for unlimited access.")
-            st.markdown("""
+        # ── Rate limit check (Pro/Agency bypass) ──
+        if not _is_pro_user() and not _check_rate_limit():
+            st.warning("You've used your free scan for today. You get 1 free scan every 24 hours.")
+            st.markdown(f"""
             <div class="upgrade-card">
                 <h2>🚀 Upgrade to SiteOracle Pro</h2>
                 <p>Unlock unlimited scans, all AI engines, PDF reports, competitor monitoring, and more.</p>
+                <a href="{STRIPE_LINK_PRO}" target="_blank"
+                   style="display:inline-block; background:#ff5555; color:white; padding:10px 24px;
+                          border-radius:8px; text-decoration:none; font-weight:700; margin-top:8px;">
+                    ⚡ Get Pro — $49/mo
+                </a>
             </div>
             """, unsafe_allow_html=True)
             st.stop()
@@ -349,20 +356,22 @@ with tab_analyze:
             gbp = check_gbp(pages, biz_info)
             status.update(label="✅ GBP done")
 
-        # ── AI Analysis ──
+        # ── AI Analysis (Pro feature) ──
         ai_text = ""
         if use_ai:
-            # Use DeepSeek by default — no API key needed
-            deepseek_key = os.getenv("DEEPSEEK_API_KEY")
-            if deepseek_key:
-                with st.spinner("Running AI analysis..."):
-                    try:
-                        ai_text = analyze_site(pages, engine="deepseek")
-                    except Exception as e:
-                        st.warning(f"AI analysis failed: {e}")
-                        ai_text = ""
+            if not _is_pro_user():
+                ai_text = ""  # skip — shown as upgrade prompt below
             else:
-                st.info("AI analysis unavailable — server configuration issue. Results still show below.")
+                deepseek_key = os.getenv("DEEPSEEK_API_KEY")
+                if deepseek_key:
+                    with st.spinner("Running AI analysis..."):
+                        try:
+                            ai_text = analyze_site(pages, engine="deepseek")
+                        except Exception as e:
+                            st.warning(f"AI analysis failed: {e}")
+                            ai_text = ""
+                else:
+                    st.info("AI analysis unavailable — server configuration issue. Results still show below.")
 
         # ── Display Scores ──
         # Extract AI Visibility score from GEO dimensions if available
@@ -428,8 +437,9 @@ with tab_analyze:
             st.success("✅ No issues found — your site is in great shape!")
             expected = combined
 
-        # ── Record this scan ──
-        _record_scan()
+        # ── Record scan for free users (rate limiting) ──
+        if not _is_pro_user():
+            _record_scan()
 
         # ── Detail Sections ──
         with st.expander("🔧 Technical SEO Details", expanded=True):
@@ -464,6 +474,9 @@ with tab_analyze:
         if ai_text:
             with st.expander("🤖 AI Deep Analysis", expanded=True):
                 st.markdown(ai_text)
+        elif use_ai and not _is_pro_user():
+            with st.expander("🤖 AI Deep Analysis — Pro Feature"):
+                render_upgrade_card("AI Deep Analysis")
 
         # ── Report Download ──
         col1, col2, col3 = st.columns(3)
@@ -511,18 +524,25 @@ with tab_analyze:
         worst_dim = min(dim_names.values(), key=lambda x: x[1])
         best_dim = max(dim_names.values(), key=lambda x: x[1])
 
-        st.markdown(f"""
-        <div class="upgrade-card">
-            <h2>🚀 Your site scored {combined}/100</h2>
-            <p><strong>{worst_dim[0]}</strong> is your weakest area ({worst_dim[1]}/100).<br>
-            Upgrade to SiteOracle Pro to unlock:<br>
-            • Unlimited scans • Competitor comparison • Scheduled monitoring • All AI engines • PDF reports</p>
-        </div>
-        """, unsafe_allow_html=True)
+        # ── Upgrade prompt (only for free users) ──
+        if not _is_pro_user():
+            st.markdown(f"""
+            <div class="upgrade-card">
+                <h2>🚀 Your site scored {combined}/100</h2>
+                <p><strong>{worst_dim[0]}</strong> is your weakest area ({worst_dim[1]}/100).<br>
+                Upgrade to unlock unlimited scans, AI deep analysis, competitor comparison, monitoring and PDF reports.</p>
+                <a href="{STRIPE_LINK_PRO}" target="_blank"
+                   style="display:inline-block; background:#ff5555; color:white; padding:10px 24px;
+                          border-radius:8px; text-decoration:none; font-weight:700; margin-top:8px;">
+                    ⚡ Get Pro — $49/mo
+                </a>
+            </div>
+            """, unsafe_allow_html=True)
 
         # ── Offer Monitoring (Pro feature) ──
-        if st.button("📊 Start Monitoring This Site (Pro)", use_container_width=True):
-            st.info("Monitoring is a Pro feature. Sign up to unlock.")
+        if not _is_pro_user():
+            if st.button("📊 Start Monitoring This Site (Pro)", use_container_width=True):
+                st.info("Log in with your Pro account email in the sidebar to unlock monitoring.")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -541,13 +561,16 @@ with tab_compare:
     comp_pages = st.slider("Pages to crawl per site", 1, 10, 3, key="comp_pages")
 
     if st.button("⚔️ Compare", type="primary", use_container_width=True) and site_a and site_b:
-        st.info("🔒 Comparison is a Pro feature. Create an account to unlock competitive analysis.")
-        st.markdown("""
-        <div class="upgrade-card">
-            <h2>🚀 Upgrade to SiteOracle Pro</h2>
-            <p>Unlock competitor comparison, unlimited scans, monitoring, and more.</p>
-        </div>
-        """, unsafe_allow_html=True)
+        if not _is_pro_user():
+            render_upgrade_card("Competitor Comparison")
+        else:
+            with st.spinner("Crawling and comparing both sites..."):
+                try:
+                    results = compare_sites(site_a, site_b, max_pages=comp_pages)
+                    report = generate_comparison_report(results)
+                    st.markdown(report, unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"Comparison failed: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -555,15 +578,35 @@ with tab_compare:
 # ══════════════════════════════════════════════════════════════════
 with tab_monitor:
     st.markdown("### 📊 Site Monitoring")
-    st.caption("Track scores over time with scheduled snapshots. (Pro feature)")
+    st.caption("Track scores over time with scheduled snapshots.")
 
-    st.markdown("""
-    <div class="upgrade-card">
-        <h2>📊 Monitoring — Pro Feature</h2>
-        <p>Track your site's performance over time with automated weekly snapshots.<br>
-        See trends, get alerts, and prove your SEO improvements.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    if not _is_pro_user():
+        render_upgrade_card("Site Monitoring")
+    else:
+        mon_url = st.text_input("Site to monitor", placeholder="https://yoursite.com", key="mon_url")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📊 Add to Monitoring", type="primary", use_container_width=True) and mon_url:
+                with st.spinner("Setting up monitor..."):
+                    try:
+                        setup_monitor(mon_url)
+                        st.success(f"✅ Monitoring started for {mon_url}")
+                    except Exception as e:
+                        st.error(f"Failed: {e}")
+        with col2:
+            if st.button("📈 View Trends", use_container_width=True):
+                try:
+                    monitors = load_monitors()
+                    if monitors:
+                        for site, data in monitors.items():
+                            st.markdown(f"**{site}**")
+                            trend = get_trend(site)
+                            if trend:
+                                st.line_chart(trend)
+                    else:
+                        st.info("No monitors set up yet. Add a site above.")
+                except Exception as e:
+                    st.error(f"Could not load monitors: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -572,6 +615,17 @@ with tab_monitor:
 with tab_settings:
     st.markdown("### ⚙️ Advanced Settings")
     st.caption("For power users who want to use their own API keys.")
+
+    with st.expander("🔐 Subscription Status"):
+        plan = get_user_plan()
+        email = st.session_state.get("user_email", None)
+        if email:
+            st.markdown(f"**Email:** {email}  \n**Plan:** {plan.capitalize()}")
+            if plan == "free":
+                st.markdown(f"[⚡ Upgrade to Pro — $49/mo]({STRIPE_LINK_PRO})")
+                st.markdown(f"[🏢 Upgrade to Agency — $149/mo]({STRIPE_LINK_AGENCY})")
+        else:
+            st.info("Log in via the sidebar to verify your subscription.")
 
     with st.expander("🔑 Bring Your Own API Key (Optional)"):
         st.markdown("""
