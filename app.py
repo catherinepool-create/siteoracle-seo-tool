@@ -17,6 +17,7 @@ from reporter import generate_report, generate_html_report, generate_pdf_report,
 from comparison import compare_sites, generate_comparison_report
 from monitor import setup_monitor, load_monitors, save_snapshot, get_trend, generate_trend_report
 from auth import render_sidebar_auth, is_pro_or_above, is_agency, get_user_plan, render_upgrade_card, STRIPE_LINK_PRO, STRIPE_LINK_AGENCY
+from emailer import send_scan_report
 
 st.set_page_config(
     page_title="SiteOracle",
@@ -372,8 +373,11 @@ with tab_analyze:
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        use_ai = st.checkbox("AI Deep Analysis", value=True,
-                             help="Uses DeepSeek AI for comprehensive analysis")
+        if _is_pro_user():
+            use_ai = st.checkbox("🧠 AI Deep Analysis", value=True, help="Uses DeepSeek AI for comprehensive analysis")
+        else:
+            st.markdown("🔒 **AI Deep Analysis** — [Pro only](%s)" % STRIPE_LINK_PRO)
+            use_ai = False
     with col2:
         biz_name = st.text_input("Business name (for GBP)", placeholder="Optional",
                                  help="Helps with Google Business Profile alignment checks")
@@ -428,11 +432,7 @@ with tab_analyze:
             """, unsafe_allow_html=True)
             st.stop()
 
-        # ── React to sample report being shown previously ──
-        if demo_btn:
-            st.rerun()
-
-        # ── Crawl & analyze ──
+        # ── Crawl ──
         with st.status("🔍 Crawling site...") as status:
             try:
                 pages = crawl(url, max_pages=max_pages)
@@ -444,158 +444,222 @@ with tab_analyze:
                 st.error(f"Crawl failed: {e}")
                 st.stop()
 
-        # Also fetch homepage raw HTML for schema analysis
         homepage_html, _ = fetch_page(url)
 
         # ── Run Checks ──
         with st.status("Running checks...") as status:
             seo = check_technical_seo(pages)
             status.update(label="✅ Technical SEO done")
-
             aeo = check_aeo(pages)
             status.update(label="✅ AEO done")
-
             geo = check_geo(pages, html=homepage_html, url=url)
             status.update(label="✅ GEO + AI Visibility done")
-
             biz_info = {"name": biz_name} if biz_name else None
             gbp = check_gbp(pages, biz_info)
-            status.update(label="✅ GBP done")
-        st.markdown("### 👀 Sample Report — squadconsole.com")
-        st.caption("This is a demo showing what SiteOracle finds. No crawl needed.")
+            status.update(label="✅ GBP done", state="complete")
 
-        # Pre-built demo results for squadconsole.com
-        seo = {
-            "score": 62, "issues": [
-                {"severity": "critical", "check": "Missing meta description on 3 pages",
-                 "detail": "3 of 5 crawled pages have no meta description. Add unique meta descriptions to improve CTR in search results."},
-                {"severity": "warning", "check": "No canonical URLs detected",
-                 "detail": "Canonical tags prevent duplicate content issues. Add rel=canonical to all pages."},
-                {"severity": "info", "check": "Thin content on 2 pages (under 300 words)",
-                 "detail": "Consider expanding content on these pages to improve topical authority."},
-            ], "passes": ["HTTPS enabled and redirects correctly", "Responsive meta tag present",
-                          "Page speed score above 70 on mobile", "No broken internal links found",
-                          "Clean URL structure with no query parameters"]
-        }
-        aeo = {
-            "score": 45, "dimensions": {
-                "faq_schema": {"score": 30, "issues": [{"severity": "critical", "check": "No FAQPage schema", "detail": "Add FAQ schema to help voice search."}], "passes": []},
-                "howto_schema": {"score": 40, "issues": [{"severity": "warning", "check": "No HowTo schema", "detail": "HowTo markup helps with procedural queries."}], "passes": []},
-                "question_keywords": {"score": 55, "issues": [], "passes": ["Some question-phrased headings found"]},
-                "featured_snippet": {"score": 50, "issues": [{"severity": "info", "check": "Weak snippet structure", "detail": "Use bullet points and numbered lists more."}], "passes": []},
-                "voice_search": {"score": 40, "issues": [], "passes": ["Conversational tone detected"]},
-                "people_also_ask": {"score": 50, "issues": [], "passes": []},
-                "content_breadth": {"score": 50, "issues": [], "passes": []},
-            }, "issues": [
-                {"severity": "critical", "check": "No FAQPage schema found", "detail": "FAQ schema directly influences featured snippets and voice answers."},
-                {"severity": "warning", "check": "Limited structured Q&A content", "detail": "Add FAQ sections to key pages."},
-            ], "passes": ["Conversational tone detected", "Some question-style headings found"]
-        }
-        geo = {
-            "score": 38, "dimensions": {
-                "brand_authority": {"score": 50, "issues": [], "passes": []},
-                "structured_data": {"score": 35, "issues": [], "passes": []},
-                "freshness": {"score": 30, "issues": [], "passes": []},
-                "topical_depth": {"score": 45, "issues": [], "passes": []},
-                "citation_readiness": {"score": 40, "issues": [], "passes": []},
-                "multimedia": {"score": 25, "issues": [], "passes": []},
-                "external_references": {"score": 30, "issues": [], "passes": []},
-                "ai_visibility": {"score": 55, "issues": [
-                    {"severity": "warning", "check": "2 AI bots blocked in robots.txt",
-                     "detail": "PerplexityBot and Bytespider are disallowed. Update robots.txt to allow them."},
-                    {"severity": "info", "check": "Missing FAQPage schema",
-                     "detail": "Adding FAQPage schema improves citation likelihood."},
-                ], "passes": ["robots.txt found — governance in place",
-                              "GPTBot and ClaudeBot allowed — ChatGPT and Claude can crawl",
-                              "Article schema detected on blog pages",
-                              "Some Q&A-style content found",
-                              "Clear definition statements found"],
-                    "robots_info": {"has_robots_txt": True, "blocked_bots": [
-                        {"name": "PerplexityBot", "label": "Perplexity AI"},
-                        {"name": "Bytespider", "label": "ByteDance (TikTok AI)"},
-                    ]}},
-            }, "issues": [
-                {"severity": "warning", "check": "No FAQPage schema", "detail": "Critical for AI citation."},
-                {"severity": "warning", "check": "2 AI bots blocked", "detail": "Perplexity and Bytespider blocked."},
-            ], "passes": ["robots.txt found", "GPTBot and ClaudeBot allowed"]
-        }
-        gbp = {
-            "score": 70, "dimensions": {}, "issues": [], "passes": [
-                "Google Business Profile likely exists",
-                "Name consistency across detected pages",
-            ], "business_info_extracted": {"name": "SquadConsole"}
-        }
+        # ── AI Analysis (Pro only) ──
+        ai_text = ""
+        if use_ai and _is_pro_user():
+            deepseek_key = os.getenv("DEEPSEEK_API_KEY")
+            if deepseek_key:
+                with st.spinner("Running AI deep analysis..."):
+                    try:
+                        ai_text = analyze_site(pages, engine="deepseek")
+                    except Exception as e:
+                        st.warning(f"AI analysis failed: {e}")
 
-        url = "https://squadconsole.com"
-        ai_vis_score = 55
-        combined = round(62 * 0.20 + 45 * 0.15 + 38 * 0.25 + 70 * 0.10 + 55 * 0.30)
-        combined = 49  # override for demo
-        ai_text = ""  # skip AI analysis for demo
-        pages = []  # skip pages for demo
-        priority_list = []
-        expected = 49
+        # ── Scores ──
+        ai_vis_score = geo.get("dimensions", {}).get("ai_visibility", {}).get("score", 0)
+        combined = round(seo["score"]*0.20 + aeo["score"]*0.15 + geo["score"]*0.25 + gbp["score"]*0.10 + ai_vis_score*0.30)
 
-        # Show results
         s_c, a_c, g_c, gbp_c, ai_c, comb_c = st.columns(6)
+        def _score_color(s): return "#22c55e" if s >= 70 else "#f59e0b" if s >= 40 else "#ef4444"
         with s_c:
-            st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:#f59e0b">62</div><div class="metric-label">Technical SEO</div></div>""", unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:{_score_color(seo["score"])}">{seo["score"]}</div><div class="metric-label">Technical SEO</div></div>', unsafe_allow_html=True)
         with a_c:
-            st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:#ef4444">45</div><div class="metric-label">AEO</div></div>""", unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:{_score_color(aeo["score"])}">{aeo["score"]}</div><div class="metric-label">AEO</div></div>', unsafe_allow_html=True)
         with g_c:
-            st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:#ef4444">38</div><div class="metric-label">GEO</div></div>""", unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:{_score_color(geo["score"])}">{geo["score"]}</div><div class="metric-label">GEO</div></div>', unsafe_allow_html=True)
         with gbp_c:
-            st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:#22c55e">70</div><div class="metric-label">GBP</div></div>""", unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:{_score_color(gbp["score"])}">{gbp["score"]}</div><div class="metric-label">GBP</div></div>', unsafe_allow_html=True)
         with ai_c:
-            st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:#f59e0b">55</div><div class="metric-label">AI Visibility</div></div>""", unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:{_score_color(ai_vis_score)}">{ai_vis_score}</div><div class="metric-label">AI Visibility</div></div>', unsafe_allow_html=True)
         with comb_c:
-            st.markdown(f"""<div class="metric-box"><div class="metric-value" style="color:#f59e0b">49</div><div class="metric-label">Combined</div></div>""", unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:{_score_color(combined)}">{combined}</div><div class="metric-label">Combined</div></div>', unsafe_allow_html=True)
 
-        # Priority fix list
-        st.markdown("### 🎯 Priority Fix List")
-        st.caption("Fix these 6 items to reach an estimated score of **76/100** (+27 pts)")
-        demo_priority = [
-            (1, "critical", "AEO", "No FAQPage schema found", "FAQ schema directly influences featured snippets and voice search answers."),
-            (2, "critical", "Technical SEO", "Missing meta description on 3 pages", "3 of 5 crawled pages have no meta description."),
-            (3, "warning", "GEO", "2 AI bots blocked in robots.txt", "PerplexityBot and Bytespider are disallowed."),
-            (4, "warning", "AEO", "Limited structured Q&A content", "Add FAQ sections to key pages."),
-            (5, "warning", "Technical SEO", "No canonical URLs detected", "Add rel=canonical to all pages."),
-            (6, "info", "Technical SEO", "Thin content on 2 pages", "Expand content to improve topical authority."),
-        ]
-        for num, sev, area, check, detail in demo_priority:
-            emoji = {"critical": "🔴", "warning": "🟡", "info": "🔵"}[sev]
-            border = {"critical": "#ef4444", "warning": "#f59e0b", "info": "#3b82f6"}[sev]
-            st.markdown(f"""
-            <div style="display: flex; gap: 12px; padding: 12px; margin-bottom: 8px;
-                        background: #1e293b; border-radius: 8px; border-left: 4px solid {border};">
-                <div style="flex-shrink: 0; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
-                            background: #0f172a; border-radius: 50%; font-weight: 700; font-size: 13px;">{num}</div>
-                <div style="flex: 1;">
-                    <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 2px;">
-                        <span style="font-size: 11px; font-weight: 700; color: {border};">{emoji} {sev.upper()}</span>
-                        <span style="font-size: 11px; color: #64748b; background: #0f172a; padding: 2px 8px; border-radius: 4px;">{area}</span>
+        # ── Priority Fix List ──
+        priority_list = _build_priority_fix_list(seo, aeo, geo, gbp)
+        if priority_list:
+            improvement = _estimate_improvement(priority_list)
+            expected = combined + improvement
+            st.markdown("### 🎯 Priority Fix List")
+            st.caption(f"Fix these {len(priority_list)} items to reach an estimated score of **{expected}/100** (+{improvement} pts)")
+            border_map = {"critical": "#ef4444", "warning": "#f59e0b", "info": "#3b82f6"}
+            emoji_map  = {"critical": "🔴", "warning": "🟡", "info": "🔵"}
+            for item in priority_list:
+                sev = item["severity"]
+                b = border_map.get(sev, "#64748b")
+                e = emoji_map.get(sev, "⚪")
+                st.markdown(f"""
+                <div style="display:flex;gap:12px;padding:12px;margin-bottom:8px;background:#1e293b;border-radius:8px;border-left:4px solid {b};">
+                    <div style="flex-shrink:0;width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:#0f172a;border-radius:50%;font-weight:700;font-size:13px;">{item['priority']}</div>
+                    <div style="flex:1;">
+                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:2px;">
+                            <span style="font-size:11px;font-weight:700;color:{b};">{e} {sev.upper()}</span>
+                            <span style="font-size:11px;color:#64748b;background:#0f172a;padding:2px 8px;border-radius:4px;">{item['area']}</span>
+                        </div>
+                        <div style="font-weight:600;color:#f1f5f9;font-size:14px;">{item['check']}</div>
+                        <div style="font-size:13px;color:#94a3b8;">{item['detail']}</div>
                     </div>
-                    <div style="font-weight: 600; color: #f1f5f9; font-size: 14px;">{check}</div>
-                    <div style="font-size: 13px; color: #94a3b8;">{detail}</div>
+                </div>""", unsafe_allow_html=True)
+
+        # ── Detail Expanders ──
+        with st.expander("🤖 AI Visibility — Can AI Bots See Your Site?", expanded=True):
+            _show_ai_visibility(geo)
+        with st.expander("🔧 Technical SEO Details"):
+            col1, col2 = st.columns(2)
+            with col1:
+                for issue in seo.get("issues", []):
+                    e = {"critical":"🔴","warning":"🟡","info":"🔵"}.get(issue["severity"],"⚪")
+                    st.markdown(f"{e} **{issue['check']}**")
+                    st.caption(issue["detail"])
+            with col2:
+                for p in seo.get("passes", []): st.markdown(f"✅ {p}")
+        with st.expander("📝 Answer Engine Optimization (AEO)"):
+            _show_dimensions(aeo)
+        with st.expander("🤖 Generative Engine Optimization (GEO)"):
+            _show_dimensions(geo)
+        with st.expander("📍 Google Business Profile Alignment"):
+            _show_dimensions(gbp)
+        if ai_text:
+            with st.expander("🧠 AI Deep Analysis", expanded=True):
+                st.markdown(ai_text)
+        elif use_ai and not _is_pro_user():
+            with st.expander("🧠 AI Deep Analysis — Pro Feature"):
+                render_upgrade_card("AI Deep Analysis")
+
+        # ── Download Reports ──
+        st.markdown("---")
+        report_base = f"siteoracle_{url.replace('https://','').replace('/','_')[:30]}"
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            html_report = generate_html_report(url, pages, seo, aeo, geo, gbp, ai_text)
+            st.download_button("📄 HTML Report", html_report, file_name=f"{report_base}.html", mime="text/html", use_container_width=True)
+        with col2:
+            txt_report = generate_report(url, pages, seo, aeo, geo, gbp, ai_text)
+            st.download_button("📝 Text Report", txt_report, file_name=f"{report_base}.txt", mime="text/plain", use_container_width=True)
+        with col3:
+            with st.spinner("Generating PDF..."):
+                pdf_bytes = generate_pdf_report(url, pages, seo, aeo, geo, gbp, ai_text)
+            if pdf_bytes:
+                st.download_button("📕 PDF Report", pdf_bytes, file_name=f"{report_base}.pdf", mime="application/pdf", use_container_width=True)
+            else:
+                st.button("📕 PDF (unavailable)", disabled=True, use_container_width=True)
+
+        # ── Email Capture ──
+        st.markdown("---")
+        if not st.session_state.get("report_email_sent"):
+            st.markdown("#### 📬 Email me this report")
+            st.caption("Get a copy sent to your inbox, plus tips to improve your score over the next 10 days.")
+            ec1, ec2 = st.columns([3, 1])
+            with ec1:
+                report_email = st.text_input("Your email", placeholder="you@example.com", key="report_email", label_visibility="collapsed")
+            with ec2:
+                if st.button("Send Report", type="primary", use_container_width=True) and report_email:
+                    top_issues = (seo.get("issues", []) + aeo.get("issues", []) + geo.get("issues", []))[:3]
+                    ok = send_scan_report(
+                        to=report_email, site_url=url,
+                        seo_score=seo["score"], aeo_score=aeo["score"],
+                        geo_score=geo["score"], gbp_score=gbp["score"],
+                        ai_score=ai_vis_score, combined=combined,
+                        top_issues=top_issues,
+                    )
+                    if ok:
+                        st.session_state["report_email_sent"] = True
+                        st.success("✅ Report sent! Check your inbox.")
+                    else:
+                        st.info("📋 Copy the URL above and paste it into SiteOracle any time to re-run.")
+        else:
+            st.success("✅ Report emailed — check your inbox.")
+
+        # ── Score Badge ──
+        if combined >= 60:
+            clean_url = url.replace("https://", "").replace("http://", "").rstrip("/")
+            badge_link = f"https://squadconsole.com/badge.html?score={combined}&site={clean_url}"
+            st.markdown(f"""
+            <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+                <div>
+                    <div style="font-weight:700;color:#e6edf3;margin-bottom:2px;">🏅 Your site scored {combined}/100 — share it!</div>
+                    <div style="font-size:13px;color:#8b949e;">Get an embeddable score badge for your website or portfolio.</div>
                 </div>
+                <a href="{badge_link}" target="_blank" style="background:#ff6b6b;color:#fff;padding:8px 20px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;white-space:nowrap;">Get Badge →</a>
             </div>
             """, unsafe_allow_html=True)
 
-        # Show AI Visibility expander
-        with st.expander("🤖 AI Visibility — Can AI Bots See Your Site?", expanded=True):
-            st.markdown(f"""<div class="metric-box" style="margin-bottom: 8px;">
-                <div class="metric-value" style="color:#f59e0b; font-size:48px;">55</div>
-                <div class="metric-label">AI Visibility Score</div>
-            </div>""", unsafe_allow_html=True)
-            st.markdown("### 🚫 Blocked AI Bots")
-            st.markdown("🔴 **PerplexityBot** — Perplexity AI")
-            st.markdown("🔴 **Bytespider** — ByteDance (TikTok AI)")
-            st.caption("These bots cannot crawl your site. Update your robots.txt to allow them.")
-            st.markdown("### ✅ Allowed AI Bots")
-            st.markdown("✅ GPTBot (ChatGPT) · ClaudeBot (Claude) · Google-Extended (Gemini) · Applebot · CCBot · FacebookBot · cohere-ai · ChatGPT-User")
+        # ── Record scan + upgrade prompt ──
+        if not _is_pro_user():
+            _record_scan()
+            st.markdown(f"""
+            <div class="upgrade-card">
+                <h2>🚀 Unlock the full picture</h2>
+                <p>Upgrade to Pro for unlimited scans, AI deep analysis, competitor comparison, monitoring and PDF reports.</p>
+                <a href="{STRIPE_LINK_PRO}" target="_blank"
+                   style="display:inline-block;background:#ff5555;color:white;padding:10px 24px;
+                          border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px;">
+                    ⚡ Get Pro — $49/mo
+                </a>
+            </div>
+            """, unsafe_allow_html=True)
 
-        # Report download
+    elif demo_btn:
+        st.markdown("### 👀 Sample Report — squadconsole.com")
+        st.caption("This is a demo showing what SiteOracle finds. No crawl needed.")
+        s_c, a_c, g_c, gbp_c, ai_c, comb_c = st.columns(6)
+        with s_c:
+            st.markdown('<div class="metric-box"><div class="metric-value" style="color:#f59e0b">62</div><div class="metric-label">Technical SEO</div></div>', unsafe_allow_html=True)
+        with a_c:
+            st.markdown('<div class="metric-box"><div class="metric-value" style="color:#ef4444">45</div><div class="metric-label">AEO</div></div>', unsafe_allow_html=True)
+        with g_c:
+            st.markdown('<div class="metric-box"><div class="metric-value" style="color:#ef4444">38</div><div class="metric-label">GEO</div></div>', unsafe_allow_html=True)
+        with gbp_c:
+            st.markdown('<div class="metric-box"><div class="metric-value" style="color:#22c55e">70</div><div class="metric-label">GBP</div></div>', unsafe_allow_html=True)
+        with ai_c:
+            st.markdown('<div class="metric-box"><div class="metric-value" style="color:#f59e0b">55</div><div class="metric-label">AI Visibility</div></div>', unsafe_allow_html=True)
+        with comb_c:
+            st.markdown('<div class="metric-box"><div class="metric-value" style="color:#f59e0b">49</div><div class="metric-label">Combined</div></div>', unsafe_allow_html=True)
+        st.markdown("### 🎯 Priority Fix List")
+        st.caption("Fix these 6 items to reach an estimated score of **76/100** (+27 pts)")
+        demo_priority = [
+            (1,"critical","AEO","No FAQPage schema found","FAQ schema directly influences featured snippets and voice search answers."),
+            (2,"critical","Technical SEO","Missing meta description on 3 pages","3 of 5 crawled pages have no meta description."),
+            (3,"warning","GEO","2 AI bots blocked in robots.txt","PerplexityBot and Bytespider are disallowed."),
+            (4,"warning","AEO","Limited structured Q&A content","Add FAQ sections to key pages."),
+            (5,"warning","Technical SEO","No canonical URLs detected","Add rel=canonical to all pages."),
+            (6,"info","Technical SEO","Thin content on 2 pages","Expand content to improve topical authority."),
+        ]
+        bm = {"critical":"#ef4444","warning":"#f59e0b","info":"#3b82f6"}
+        em = {"critical":"🔴","warning":"🟡","info":"🔵"}
+        for num, sev, area, check, detail in demo_priority:
+            b = bm[sev]
+            st.markdown(f"""
+            <div style="display:flex;gap:12px;padding:12px;margin-bottom:8px;background:#1e293b;border-radius:8px;border-left:4px solid {b};">
+                <div style="flex-shrink:0;width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:#0f172a;border-radius:50%;font-weight:700;font-size:13px;">{num}</div>
+                <div style="flex:1;">
+                    <div style="display:flex;gap:8px;align-items:center;margin-bottom:2px;">
+                        <span style="font-size:11px;font-weight:700;color:{b};">{em[sev]} {sev.upper()}</span>
+                        <span style="font-size:11px;color:#64748b;background:#0f172a;padding:2px 8px;border-radius:4px;">{area}</span>
+                    </div>
+                    <div style="font-weight:600;color:#f1f5f9;font-size:14px;">{check}</div>
+                    <div style="font-size:13px;color:#94a3b8;">{detail}</div>
+                </div>
+            </div>""", unsafe_allow_html=True)
+        with st.expander("🤖 AI Visibility — Can AI Bots See Your Site?", expanded=True):
+            st.markdown('<div class="metric-box"><div class="metric-value" style="color:#f59e0b;font-size:48px;">55</div><div class="metric-label">AI Visibility Score</div></div>', unsafe_allow_html=True)
+            st.markdown("**🚫 Blocked:** 🔴 PerplexityBot — Perplexity AI &nbsp;·&nbsp; 🔴 Bytespider — ByteDance")
+            st.markdown("**✅ Allowed:** GPTBot · ClaudeBot · Google-Extended · Applebot · CCBot · cohere-ai")
         st.markdown("---")
-        st.markdown("### 📄 Run a real scan to download your report")
+        st.info("👆 This is sample data. Enter your own URL above and click **Analyze** to get your real score.")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -715,7 +779,7 @@ with tab_settings:
     - 📊 Scheduled monitoring (Pro)  
     - 📄 Beautiful HTML reports
 
-    Built with ❤️ — ask Catherine about it.
+    Built by [SquadConsole](https://squadconsole.com)
     """)
 
 
