@@ -391,12 +391,18 @@ render_sidebar_auth()
 # ── Detect embedded mode (iframe on squadconsole.com) ──
 _embedded = st.query_params.get("embedded", False)
 
+# ── URL auto-fill from query params: ?url=... or ?roast=... ──
+_url_from_qp = st.query_params.get("url") or st.query_params.get("roast") or ""
+_is_roast = bool(st.query_params.get("roast"))
+
 # ── HERO SECTION (hidden when embedded in squadconsole.com iframe) ──
 if not _embedded:
-    st.markdown("""
+    _hero_title = "🔥 Roast my site — give me the brutal truth" if _is_roast else "Which AI bots can read your website?"
+    _hero_tagline = "SiteOracle will tear apart your site and tell you exactly what's broken. No sugarcoating." if _is_roast else "SiteOracle scans your site — technical SEO, AI visibility, answer engines, and local search — and tells you exactly what to fix."
+    st.markdown(f"""
 <div class="hero">
-    <h1>Which AI bots can read your website?</h1>
-    <p class="tagline">SiteOracle scans your site — technical SEO, AI visibility, answer engines, and local search — and tells you exactly what to fix.</p>
+    <h1>{_hero_title}</h1>
+    <p class="tagline">{_hero_tagline}</p>
     <p class="sub-tagline">No account needed. Enter any URL and get a scored report in under a minute.</p>
     <div class="badge-row">
         <span class="badge">🔧 Technical SEO</span>
@@ -460,6 +466,7 @@ with tab_analyze:
     col1, col2 = st.columns([2, 1])
     with col1:
         url = st.text_input("Website URL", placeholder="https://example.com",
+                            value=_url_from_qp,
                             help="Enter the full URL including https://")
     with col2:
         max_pages = st.slider("Pages to crawl", 1, 20, 5)
@@ -506,6 +513,12 @@ with tab_analyze:
                 st.markdown(result)
 
     elif run_btn and url:
+        if not url.startswith("http"):
+            url = "https://" + url
+
+    # ── Auto-trigger for roast/url query params (no button needed) ──
+    if _url_from_qp and not run_btn and not screenshot_file:
+        url = _url_from_qp
         if not url.startswith("http"):
             url = "https://" + url
 
@@ -747,6 +760,29 @@ with tab_analyze:
         # ── Record scan + upgrade prompt ──
         if not _is_pro_user():
             _record_scan()
+
+            # ── Competitor scan hook — one-click, irresistible ──
+            safe_short = url.replace("https://", "").replace("http://", "").rstrip("/")[:25]
+            st.markdown("---")
+            comp_target = st.text_input(
+                "🔍 Scan a competitor — see what they're doing wrong",
+                placeholder=f"https://competitor-of-{safe_short}.com",
+                key="comp_scan",
+                label_visibility="visible",
+            )
+            comp_col1, comp_col2 = st.columns([1, 1])
+            with comp_col1:
+                if st.button("⚔️ Scan Competitor (Free)", type="primary", use_container_width=True, key="comp_btn") and comp_target:
+                    if not comp_target.startswith("http"):
+                        comp_target = "https://" + comp_target
+                    st.query_params["url"] = comp_target
+                    st.rerun()
+            with comp_col2:
+                st.markdown(
+                    '<div style="padding:8px 0;color:#64748b;font-size:13px;">Your competitor\'s weaknesses become your strengths →</div>',
+                    unsafe_allow_html=True,
+                )
+
             st.markdown(f"""
             <div class="upgrade-card">
                 <h2>🚀 Unlock the full picture</h2>
