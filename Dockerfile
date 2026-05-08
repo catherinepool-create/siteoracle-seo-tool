@@ -26,6 +26,6 @@ USER siteoracle
 EXPOSE 8501
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8501}/_stcore/health || exit 1
+    CMD curl -f http://localhost:8080/_stcore/health || exit 1
 
 CMD ["/app/start.sh"]
