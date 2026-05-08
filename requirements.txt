@@ -8,3 +8,4 @@ Pillow>=10.0.0
 anthropic>=0.30.0
 weasyprint>=60.0
 stripe>=8.0.0
+playwright>=1.40.0
