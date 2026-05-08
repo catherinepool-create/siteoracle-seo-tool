@@ -395,8 +395,17 @@ _embedded = st.query_params.get("embedded", False)
 _url_from_qp = st.query_params.get("url") or st.query_params.get("roast") or ""
 _is_roast = bool(st.query_params.get("roast"))
 
-# ── HERO SECTION (hidden when embedded in squadconsole.com iframe) ──
-if not _embedded:
+# ── Result mode: clean scorecard view ──
+_result_url = st.query_params.get("result", "")
+if _result_url:
+    st.markdown("""
+    <div style="text-align:center;padding:32px 16px 8px;">
+        <div style="font-size:14px;color:#64748b;margin-bottom:8px;">🔍 SiteOracle Scorecard</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+# ── HERO SECTION (hidden when embedded in squadconsole.com iframe or result mode) ──
+if not _embedded and not _result_url:
     _hero_title = "🔥 Roast my site — give me the brutal truth" if _is_roast else "Which AI bots can read your website?"
     _hero_tagline = "SiteOracle will tear apart your site and tell you exactly what's broken. No sugarcoating." if _is_roast else "SiteOracle scans your site — technical SEO, AI visibility, answer engines, and local search — and tells you exactly what to fix."
     st.markdown(f"""
@@ -450,50 +459,73 @@ if not _embedded:
 
     st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
-# ── Tabs ────────────────────────────────────────────────────────
-tab_visual, tab_analyze, tab_compare, tab_monitor, tab_settings = st.tabs([
-    "👁️ Visual Audit",
-    "🌐 Analyze Site",
-    "⚔️ Compare",
-    "📊 Monitoring",
-    "⚙️ Settings",
-])
+# ── Tabs (hidden in result mode — shows clean scorecard) ──
+if not _result_url:
+    tab_visual, tab_analyze, tab_compare, tab_monitor, tab_settings = st.tabs([
+        "👁️ Visual Audit",
+        "🌐 Analyze Site",
+        "⚔️ Compare",
+        "📊 Monitoring",
+        "⚙️ Settings",
+    ])
+else:
+    # Result mode: just show a clean input + result
+    st.markdown(f"""
+    <div style="max-width:600px;margin:0 auto 20px;text-align:center;">
+        <div style="font-size:13px;color:#64748b;">Scorecard for</div>
+        <div style="font-size:18px;font-weight:700;color:#e6edf3;">{_result_url}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    tab_analyze = st.container()
 
 # ══════════════════════════════════════════════════════════════════
 # TAB: ANALYZE
 # ══════════════════════════════════════════════════════════════════
 with tab_analyze:
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        url = st.text_input("Website URL", placeholder="https://example.com",
-                            value=_url_from_qp,
-                            help="Enter the full URL including https://")
-    with col2:
-        max_pages = st.slider("Pages to crawl", 1, 20, 5)
+    # ── In result mode: hide inputs, auto-run ──
+    if _result_url:
+        url = "https://" + _result_url if not _result_url.startswith("http") else _result_url
+        run_btn = False
+        demo_btn = False
+        screenshot_file = None
+        max_pages = 5
+        use_ai = False
+        biz_name = ""
+        # Show a loading indicator
+        with st.spinner(f"Scanning {url}..."):
+            pass
+    else:
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            url = st.text_input("Website URL", placeholder="https://example.com",
+                                value=_url_from_qp,
+                                help="Enter the full URL including https://")
+        with col2:
+            max_pages = st.slider("Pages to crawl", 1, 20, 5)
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if _is_pro_user():
-            use_ai = st.checkbox("🧠 AI Deep Analysis", value=True, help="Uses DeepSeek AI for comprehensive analysis")
-        else:
-            st.markdown("🔒 **AI Deep Analysis** — [Pro only](%s)" % STRIPE_LINK_PRO)
-            use_ai = False
-    with col2:
-        biz_name = st.text_input("Business name (for GBP)", placeholder="Optional",
-                                 help="Helps with Google Business Profile alignment checks")
-    with col3:
-        st.markdown("")  # spacer
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if _is_pro_user():
+                use_ai = st.checkbox("🧠 AI Deep Analysis", value=True, help="Uses DeepSeek AI for comprehensive analysis")
+            else:
+                st.markdown("🔒 **AI Deep Analysis** — [Pro only](%s)" % STRIPE_LINK_PRO)
+                use_ai = False
+        with col2:
+            biz_name = st.text_input("Business name (for GBP)", placeholder="Optional",
+                                     help="Helps with Google Business Profile alignment checks")
+        with col3:
+            st.markdown("")  # spacer
 
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        run_btn = st.button("🔍 Analyze", type="primary", use_container_width=True)
-    with col2:
-        demo_btn = st.button("👀 Try Sample Report", use_container_width=True,
-                             help="See a live demo report without scanning")
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            run_btn = st.button("🔍 Analyze", type="primary", use_container_width=True)
+        with col2:
+            demo_btn = st.button("👀 Try Sample Report", use_container_width=True,
+                                 help="See a live demo report without scanning")
 
-    screenshot_file = st.file_uploader("Or upload screenshot for AI analysis",
-                                        type=["png", "jpg", "jpeg", "webp"],
-                                        help="Can't crawl a site? Upload a screenshot instead.")
+        screenshot_file = st.file_uploader("Or upload screenshot for AI analysis",
+                                            type=["png", "jpg", "jpeg", "webp"],
+                                            help="Can't crawl a site? Upload a screenshot instead.")
 
     if screenshot_file:
         ext = screenshot_file.name.rsplit(".", 1)[-1]
@@ -516,11 +548,14 @@ with tab_analyze:
         if not url.startswith("http"):
             url = "https://" + url
 
-    # ── Auto-trigger for roast/url query params (no button needed) ──
-    if _url_from_qp and not run_btn and not screenshot_file:
-        url = _url_from_qp
-        if not url.startswith("http"):
-            url = "https://" + url
+    # ── Auto-trigger for roast/url/result query params (no button needed) ──
+    if (_url_from_qp or _result_url) and not run_btn and not screenshot_file:
+        if _result_url:
+            url = "https://" + _result_url if not _result_url.startswith("http") else _result_url
+        else:
+            url = _url_from_qp
+            if not url.startswith("http"):
+                url = "https://" + url
 
         # ── Rate limit check (Pro/Agency bypass) ──
         if not _is_pro_user() and not _check_rate_limit():
@@ -743,10 +778,12 @@ with tab_analyze:
         else:
             st.success("✅ Report emailed — check your inbox.")
 
-        # ── Score Badge ──
+        # ── Score Badge + Shareable Link + Embed Code ──
+        clean_url = url.replace("https://", "").replace("http://", "").rstrip("/")
+        share_link = f"https://siteoracle-seo-tool-production.up.railway.app/?result={clean_url}"
+        badge_link = f"https://squadconsole.com/badge.html?score={combined}&site={clean_url}"
+
         if combined >= 60:
-            clean_url = url.replace("https://", "").replace("http://", "").rstrip("/")
-            badge_link = f"https://squadconsole.com/badge.html?score={combined}&site={clean_url}"
             st.markdown(f"""
             <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
                 <div>
@@ -756,6 +793,25 @@ with tab_analyze:
                 <a href="{badge_link}" target="_blank" style="background:#ff6b6b;color:#fff;padding:8px 20px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;white-space:nowrap;">Get Badge →</a>
             </div>
             """, unsafe_allow_html=True)
+
+        # ── Shareable Link & Embed Code (all users) ──
+        st.markdown(f"""
+        <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:16px 20px;margin-bottom:16px;">
+            <div style="font-weight:700;color:#e6edf3;margin-bottom:8px;">🔗 Share your score</div>
+            <div style="display:flex;gap:8px;margin-bottom:10px;">
+                <input id="share-link" value="{share_link}" readonly
+                       style="flex:1;background:#0f172a;border:1px solid #30363d;border-radius:8px;padding:8px 12px;color:#e6edf3;font-size:13px;">
+                <button onclick="navigator.clipboard.writeText('{share_link}')"
+                        style="background:#6366f1;color:white;border:none;border-radius:8px;padding:8px 16px;cursor:pointer;font-weight:600;">Copy</button>
+            </div>
+            <details>
+                <summary style="color:#94a3b8;font-size:13px;cursor:pointer;">📋 Embed badge on your site</summary>
+                <textarea readonly rows="4"
+                    style="width:100%;margin-top:8px;background:#0f172a;border:1px solid #30363d;border-radius:8px;padding:10px;color:#e6edf3;font-size:12px;font-family:monospace;"><a href="{share_link}" target="_blank"><img src="https://img.shields.io/badge/SiteOracle%20Score-{combined}%2F100-{"brightgreen" if combined>=70 else "orange" if combined>=40 else "red"}" alt="SiteOracle Score: {combined}/100"></a></textarea>
+                <div style="color:#64748b;font-size:12px;margin-top:6px;">Copy-paste this into your website footer or README. Links back to your live score.</div>
+            </details>
+        </div>
+        """, unsafe_allow_html=True)
 
         # ── Record scan + upgrade prompt ──
         if not _is_pro_user():
@@ -794,6 +850,14 @@ with tab_analyze:
                 </a>
             </div>
             """, unsafe_allow_html=True)
+
+        # ── In result mode: show "Scan another site" link ──
+        if _result_url:
+            st.markdown("---")
+            st.markdown(
+                '<div style="text-align:center;"><a href="/" style="color:#6366f1;font-weight:600;text-decoration:none;">← Scan another site</a></div>',
+                unsafe_allow_html=True,
+            )
 
     elif demo_btn:
         st.markdown("### 👀 Sample Report — squadconsole.com")
