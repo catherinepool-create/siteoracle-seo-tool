@@ -18,7 +18,7 @@ COPY . .
 
 # Install Python dependencies then Playwright Chromium (with its OS deps)
 RUN pip install --no-cache-dir -r requirements.txt && \
-    playwright install --with-deps chromium
+    python -m playwright install --with-deps chromium
 
 # Create non-root user; grant write to nginx tmp dirs
 RUN useradd -m -u 1000 siteoracle && chown -R siteoracle:siteoracle /app \
