@@ -18,6 +18,8 @@ from comparison import compare_sites, generate_comparison_report
 from monitor import setup_monitor, load_monitors, save_snapshot, get_trend, generate_trend_report
 from auth import render_sidebar_auth, is_pro_or_above, is_agency, get_user_plan, render_upgrade_card, STRIPE_LINK_PRO, STRIPE_LINK_AGENCY
 from emailer import send_scan_report
+from visual_audit import analyse_screenshot_visual
+from screenshot import capture_screenshot
 
 st.set_page_config(
     page_title="SiteOracle",
@@ -78,6 +80,96 @@ def _record_scan():
     else:
         limits[client_id] = {"date": today, "count": 1}
     _save_rate_limits(limits)
+
+
+# ── Display Helpers ──────────────────────────────────────────────
+
+def _show_dimensions(results):
+    """Display dimension breakdown for AEO/GEO/GBP results."""
+    dims = results.get("dimensions", {})
+    if not dims:
+        st.info("No dimension data available.")
+        return
+
+    cols = st.columns(min(len(dims), 4))
+    for i, (name, dim) in enumerate(dims.items()):
+        with cols[i % len(cols)]:
+            score = dim.get("score", 0)
+            color = "#22c55e" if score >= 70 else "#f59e0b" if score >= 40 else "#ef4444"
+            st.markdown(f"""<div class="metric-box" style="margin-bottom: 8px;">
+                <div class="metric-value" style="color:{color}; font-size:24px;">{score}</div>
+                <div class="metric-label">{name.replace('_', ' ')}</div>
+            </div>""", unsafe_allow_html=True)
+
+    all_issues = results.get("issues", [])
+    all_passes = results.get("passes", [])
+    if all_issues:
+        st.markdown("**Issues**")
+        for issue in all_issues:
+            emoji = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(issue["severity"], "⚪")
+            st.markdown(f"{emoji} **{issue['check']}** — {issue['detail']}")
+    if all_passes:
+        st.markdown("**Passes**")
+        for p in all_passes:
+            st.markdown(f"✅ {p}")
+
+
+def _show_ai_visibility(geo_results):
+    """Display the AI Visibility section — the flagship feature."""
+    dims = geo_results.get("dimensions", {})
+    ai_vis = dims.get("ai_visibility", {})
+
+    if not ai_vis:
+        st.info("AI Visibility data not available.")
+        return
+
+    score = ai_vis.get("score", 0)
+    color = "#22c55e" if score >= 70 else "#f59e0b" if score >= 40 else "#ef4444"
+
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        st.markdown(f"""<div class="metric-box" style="margin-bottom: 8px;">
+            <div class="metric-value" style="color:{color}; font-size:48px;">{score}</div>
+            <div class="metric-label">AI Visibility Score</div>
+        </div>""", unsafe_allow_html=True)
+    with col2:
+        st.markdown("""
+        **What this checks:**
+        - 🤖 Which AI bots (ChatGPT, Claude, Perplexity, Gemini) can access your site via robots.txt
+        - 🏷️ Schema.org types present — how well AI understands your content
+        - 📝 Content structure — how easily AI can extract and cite your information
+        """)
+
+    robots_info = ai_vis.get("robots_info", {})
+    blocked = robots_info.get("blocked_bots", [])
+    has_robots = robots_info.get("has_robots_txt", False)
+
+    if blocked:
+        st.markdown("### 🚫 Blocked AI Bots")
+        for bot in blocked:
+            st.markdown(f"🔴 **{bot['name']}** — {bot['label']}")
+        st.caption("These bots cannot crawl your site. Update your robots.txt to allow them.")
+    elif has_robots:
+        st.markdown("### ✅ All AI Bots Allowed")
+        st.caption("Your robots.txt doesn't block major AI crawlers. Good.")
+
+    if not has_robots:
+        st.markdown("### ⚠️ No robots.txt Found")
+        st.caption("Without robots.txt, AI bots default to allowed — but you lose control. Consider adding one.")
+
+    all_issues = ai_vis.get("issues", [])
+    all_passes = ai_vis.get("passes", [])
+
+    if all_issues:
+        st.markdown("### 🔧 Issues Found")
+        for issue in all_issues:
+            emoji = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(issue["severity"], "⚪")
+            st.markdown(f"{emoji} **{issue['check']}** — {issue['detail']}")
+    if all_passes:
+        st.markdown("### ✅ What's Working")
+        for p in all_passes:
+            st.markdown(f"✅ {p}")
+
 
 # ── CSS ──────────────────────────────────────────────────────────
 st.markdown("""
@@ -353,7 +445,8 @@ if not _embedded:
     st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
 # ── Tabs ────────────────────────────────────────────────────────
-tab_analyze, tab_compare, tab_monitor, tab_settings = st.tabs([
+tab_visual, tab_analyze, tab_compare, tab_monitor, tab_settings = st.tabs([
+    "👁️ Visual Audit",
     "🌐 Analyze Site",
     "⚔️ Compare",
     "📊 Monitoring",
@@ -458,6 +551,20 @@ with tab_analyze:
             gbp = check_gbp(pages, biz_info)
             status.update(label="✅ GBP done", state="complete")
 
+        # ── Visual Audit (auto-screenshot, Pro only) ──
+        vis_score = 0
+        vis_report = ""
+        if _is_pro_user() and os.getenv("ANTHROPIC_API_KEY"):
+            with st.status("📸 Running visual audit...") as vis_status:
+                tmp_shot = "/tmp/siteoracle_auto_screenshot.png"
+                if capture_screenshot(url, tmp_shot):
+                    vis_result = analyse_screenshot_visual(tmp_shot)
+                    vis_score = vis_result.get("score", 0)
+                    vis_report = vis_result.get("report", "")
+                    vis_status.update(label=f"✅ Visual audit — {vis_score}/100", state="complete")
+                else:
+                    vis_status.update(label="⚠️ Screenshot skipped (page not reachable)", state="error")
+
         # ── AI Analysis (Pro only) ──
         ai_text = ""
         if use_ai and _is_pro_user():
@@ -473,7 +580,7 @@ with tab_analyze:
         ai_vis_score = geo.get("dimensions", {}).get("ai_visibility", {}).get("score", 0)
         combined = round(seo["score"]*0.20 + aeo["score"]*0.15 + geo["score"]*0.25 + gbp["score"]*0.10 + ai_vis_score*0.30)
 
-        s_c, a_c, g_c, gbp_c, ai_c, comb_c = st.columns(6)
+        s_c, a_c, g_c, gbp_c, ai_c, vis_c, comb_c = st.columns(7)
         def _score_color(s): return "#22c55e" if s >= 70 else "#f59e0b" if s >= 40 else "#ef4444"
         with s_c:
             st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:{_score_color(seo["score"])}">{seo["score"]}</div><div class="metric-label">Technical SEO</div></div>', unsafe_allow_html=True)
@@ -485,6 +592,10 @@ with tab_analyze:
             st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:{_score_color(gbp["score"])}">{gbp["score"]}</div><div class="metric-label">GBP</div></div>', unsafe_allow_html=True)
         with ai_c:
             st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:{_score_color(ai_vis_score)}">{ai_vis_score}</div><div class="metric-label">AI Visibility</div></div>', unsafe_allow_html=True)
+        with vis_c:
+            vis_disp = str(vis_score) if vis_score else "—"
+            vis_col = _score_color(vis_score) if vis_score else "#64748b"
+            st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:{vis_col}">{vis_disp}</div><div class="metric-label">Visual Design</div></div>', unsafe_allow_html=True)
         with comb_c:
             st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:{_score_color(combined)}">{combined}</div><div class="metric-label">Combined</div></div>', unsafe_allow_html=True)
 
@@ -538,6 +649,13 @@ with tab_analyze:
         elif use_ai and not _is_pro_user():
             with st.expander("🧠 AI Deep Analysis — Pro Feature"):
                 render_upgrade_card("AI Deep Analysis")
+
+        if vis_report:
+            with st.expander("👁️ Visual Design Audit", expanded=False):
+                st.markdown(vis_report)
+        elif not _is_pro_user():
+            with st.expander("👁️ Visual Design Audit — Pro Feature"):
+                render_upgrade_card("Visual Design Audit")
 
         # ── Download Reports ──
         st.markdown("---")
@@ -663,6 +781,143 @@ with tab_analyze:
 
 
 # ══════════════════════════════════════════════════════════════════
+# TAB: VISUAL AUDIT
+# ══════════════════════════════════════════════════════════════════
+with tab_visual:
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,#1c2333,#161b22);border:1px solid #30363d;border-radius:16px;padding:28px 32px;margin-bottom:24px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#ff6b6b;margin-bottom:8px;">NEW FEATURE</div>
+        <h2 style="font-size:1.6rem;font-weight:800;color:#e6edf3;margin:0 0 8px;">👁️ AI Visual Audit</h2>
+        <p style="color:#8b949e;margin:0;max-width:600px;">Upload a screenshot of any website and Claude AI will critique the design, CTA, trust signals, typography, and conversion elements — with a score and specific fixes.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    va_col1, va_col2 = st.columns([2, 1])
+    with va_col1:
+        visual_file = st.file_uploader(
+            "Upload a website screenshot",
+            type=["png", "jpg", "jpeg", "webp"],
+            help="Full-page or above-the-fold screenshots work best",
+            key="visual_audit_upload",
+        )
+    with va_col2:
+        st.markdown("")
+        st.markdown("")
+        st.markdown("""
+        **Works best with:**
+        - Full-page screenshots
+        - Above-the-fold captures
+        - Mobile screenshots
+        - Landing pages & homepages
+        """)
+
+    if visual_file:
+        ext = visual_file.name.rsplit(".", 1)[-1]
+        tmp_path = f"/tmp/siteoracle_visual.{ext}"
+        Path(tmp_path).write_bytes(visual_file.getvalue())
+
+        col_img, col_btn = st.columns([3, 1])
+        with col_img:
+            st.image(visual_file, caption="Your screenshot", use_container_width=True)
+        with col_btn:
+            st.markdown("")
+            run_visual = st.button("🔍 Audit This Page", type="primary", use_container_width=True)
+
+        if run_visual:
+            if not os.getenv("ANTHROPIC_API_KEY"):
+                st.error("Claude API key not configured. Add ANTHROPIC_API_KEY to Railway environment variables.")
+            else:
+                with st.spinner("Claude is reviewing your site design... (~20 seconds)"):
+                    result = analyse_screenshot_visual(tmp_path)
+
+                if result["error"]:
+                    st.error(f"Visual audit failed: {result['error']}")
+                else:
+                    score = result["score"]
+                    score_color = "#22c55e" if score >= 70 else "#f59e0b" if score >= 40 else "#ef4444"
+
+                    st.markdown(f"""
+                    <div style="text-align:center;padding:24px;background:#161b22;border:1px solid #30363d;border-radius:12px;margin-bottom:24px;">
+                        <div style="font-size:64px;font-weight:800;color:{score_color};line-height:1;">{score}</div>
+                        <div style="color:#8b949e;font-size:14px;margin-top:4px;">Visual Design Score / 100</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    st.markdown(result["report"])
+
+                    # Email capture
+                    st.markdown("---")
+                    st.markdown("#### 📬 Email me this visual audit")
+                    vc1, vc2 = st.columns([3, 1])
+                    with vc1:
+                        va_email = st.text_input("Your email", placeholder="you@example.com", key="va_email", label_visibility="collapsed")
+                    with vc2:
+                        if st.button("Send", use_container_width=True) and va_email:
+                            st.success("✅ We'll add email delivery for visual audits soon — bookmark this page!")
+
+                    if not _is_pro_user():
+                        st.markdown(f"""
+                        <div class="upgrade-card" style="margin-top:24px;">
+                            <h2>⚡ Unlimited Visual Audits — Pro</h2>
+                            <p>Run visual audits on unlimited pages. Compare your site vs competitors. Get PDF reports.</p>
+                            <a href="{STRIPE_LINK_PRO}" target="_blank"
+                               style="display:inline-block;background:#ff5555;color:white;padding:10px 24px;
+                                      border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px;">
+                                Get Pro — $49/mo
+                            </a>
+                        </div>
+                        """, unsafe_allow_html=True)
+    else:
+        # Show example of what the audit produces
+        st.markdown("""
+        <div style="background:#161b22;border:1px dashed #30363d;border-radius:12px;padding:40px;text-align:center;color:#8b949e;">
+            <div style="font-size:48px;margin-bottom:12px;">📸</div>
+            <div style="font-size:16px;font-weight:600;color:#e6edf3;margin-bottom:8px;">Upload a screenshot to get started</div>
+            <div style="font-size:14px;">Claude will score your design and give specific recommendations to improve conversions</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("#### What Claude checks:")
+        ex1, ex2, ex3 = st.columns(3)
+        with ex1:
+            st.markdown("""
+            **Above the fold**
+            - Headline clarity
+            - CTA visibility
+            - Value proposition
+
+            **Typography**
+            - Readability
+            - Font hierarchy
+            - Contrast
+            """)
+        with ex2:
+            st.markdown("""
+            **Trust signals**
+            - Social proof
+            - Authority logos
+            - Security badges
+
+            **Layout**
+            - Visual hierarchy
+            - Whitespace
+            - Eye flow
+            """)
+        with ex3:
+            st.markdown("""
+            **Conversion**
+            - Button copy & placement
+            - Form friction
+            - Next step clarity
+
+            **Mobile**
+            - Touch targets
+            - Text sizing
+            - Layout adaptability
+            """)
+
+
+# ══════════════════════════════════════════════════════════════════
 # TAB: COMPARE
 # ══════════════════════════════════════════════════════════════════
 with tab_compare:
@@ -783,94 +1038,3 @@ with tab_settings:
     """)
 
 
-# ── Helpers ──────────────────────────────────────────────────────
-
-def _show_dimensions(results):
-    """Display dimension breakdown for AEO/GEO/GBP results."""
-    dims = results.get("dimensions", {})
-    if not dims:
-        st.info("No dimension data available.")
-        return
-
-    cols = st.columns(min(len(dims), 4))
-    for i, (name, dim) in enumerate(dims.items()):
-        with cols[i % len(cols)]:
-            score = dim.get("score", 0)
-            color = "#22c55e" if score >= 70 else "#f59e0b" if score >= 40 else "#ef4444"
-            st.markdown(f"""<div class="metric-box" style="margin-bottom: 8px;">
-                <div class="metric-value" style="color:{color}; font-size:24px;">{score}</div>
-                <div class="metric-label">{name.replace('_', ' ')}</div>
-            </div>""", unsafe_allow_html=True)
-
-    # Issues and passes
-    all_issues = results.get("issues", [])
-    all_passes = results.get("passes", [])
-    if all_issues:
-        st.markdown("**Issues**")
-        for issue in all_issues:
-            emoji = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(issue["severity"], "⚪")
-            st.markdown(f"{emoji} **{issue['check']}** — {issue['detail']}")
-    if all_passes:
-        st.markdown("**Passes**")
-        for p in all_passes:
-            st.markdown(f"✅ {p}")
-
-
-def _show_ai_visibility(geo_results):
-    """Display the AI Visibility section — the flagship feature."""
-    dims = geo_results.get("dimensions", {})
-    ai_vis = dims.get("ai_visibility", {})
-
-    if not ai_vis:
-        st.info("AI Visibility data not available.")
-        return
-
-    score = ai_vis.get("score", 0)
-    color = "#22c55e" if score >= 70 else "#f59e0b" if score >= 40 else "#ef4444"
-
-    # Big score at top
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        st.markdown(f"""<div class="metric-box" style="margin-bottom: 8px;">
-            <div class="metric-value" style="color:{color}; font-size:48px;">{score}</div>
-            <div class="metric-label">AI Visibility Score</div>
-        </div>""", unsafe_allow_html=True)
-    with col2:
-        st.markdown("""
-        **What this checks:**
-        - 🤖 Which AI bots (ChatGPT, Claude, Perplexity, Gemini) can access your site via robots.txt
-        - 🏷️ Schema.org types present — how well AI understands your content
-        - 📝 Content structure — how easily AI can extract and cite your information
-        """)
-
-    # Blocked bots section
-    robots_info = ai_vis.get("robots_info", {})
-    blocked = robots_info.get("blocked_bots", [])
-    has_robots = robots_info.get("has_robots_txt", False)
-
-    if blocked:
-        st.markdown("### 🚫 Blocked AI Bots")
-        for bot in blocked:
-            st.markdown(f"🔴 **{bot['name']}** — {bot['label']}")
-        st.caption("These bots cannot crawl your site. Update your robots.txt to allow them.")
-    elif has_robots:
-        st.markdown("### ✅ All AI Bots Allowed")
-        st.caption("Your robots.txt doesn't block major AI crawlers. Good.")
-
-    if not has_robots:
-        st.markdown("### ⚠️ No robots.txt Found")
-        st.caption("Without robots.txt, AI bots default to allowed — but you lose control. Consider adding one.")
-
-    # Issues and passes (filtered to AI visibility)
-    all_issues = ai_vis.get("issues", [])
-    all_passes = ai_vis.get("passes", [])
-
-    if all_issues:
-        st.markdown("### 🔧 Issues Found")
-        for issue in all_issues:
-            emoji = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(issue["severity"], "⚪")
-            st.markdown(f"{emoji} **{issue['check']}** — {issue['detail']}")
-    if all_passes:
-        st.markdown("### ✅ What's Working")
-        for p in all_passes:
-            st.markdown(f"✅ {p}")
