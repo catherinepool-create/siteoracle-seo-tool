@@ -599,6 +599,35 @@ with tab_analyze:
         with comb_c:
             st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:{_score_color(combined)}">{combined}</div><div class="metric-label">Combined</div></div>', unsafe_allow_html=True)
 
+        # ── Email capture — inline, right after scores ──
+        if not st.session_state.get("report_email_sent"):
+            ec1, ec2, ec3 = st.columns([2, 1, 1])
+            with ec1:
+                report_email_top = st.text_input(
+                    "Email", placeholder="📬 Email me this report",
+                    key="report_email_top", label_visibility="collapsed"
+                )
+            with ec2:
+                send_top = st.button("Send Report", type="primary", use_container_width=True, key="send_top")
+            with ec3:
+                st.caption("Get a copy + 10-day tips")
+            if send_top and report_email_top:
+                top_issues = (seo.get("issues", []) + aeo.get("issues", []) + geo.get("issues", []))[:3]
+                ok = send_scan_report(
+                    to=report_email_top, site_url=url,
+                    seo_score=seo["score"], aeo_score=aeo["score"],
+                    geo_score=geo["score"], gbp_score=gbp["score"],
+                    ai_score=ai_vis_score, combined=combined,
+                    top_issues=top_issues,
+                )
+                if ok:
+                    st.session_state["report_email_sent"] = True
+                    st.success("✅ Report sent! Check your inbox.")
+                else:
+                    st.info("📋 Email delivery will be live shortly — your report is below.")
+        else:
+            st.success("✅ Report emailed — check your inbox.")
+
         # ── Priority Fix List ──
         priority_list = _build_priority_fix_list(seo, aeo, geo, gbp)
         if priority_list:
