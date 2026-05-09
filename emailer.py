@@ -7,7 +7,7 @@ import urllib.error
 
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
-FROM_EMAIL = "SiteOracle <hello@squadconsole.com>"
+FROM_EMAIL = "Catherine <catherine@squadconsole.com>"
 
 
 def _send(to: str, subject: str, html: str) -> bool:
