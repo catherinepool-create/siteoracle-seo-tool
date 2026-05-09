@@ -1101,121 +1101,124 @@ if 'tab_visual' in locals() or 'tab_visual' in globals():
 # ══════════════════════════════════════════════════════════════════
 # TAB: COMPARE
 # ══════════════════════════════════════════════════════════════════
-with tab_compare:
-    st.markdown("### ⚔️ Compare Two Sites")
-    st.caption("Analyze and compare your site against a competitor. (Pro feature)")
+if 'tab_compare' in locals() or 'tab_compare' in globals():
+    with tab_compare:
+        st.markdown("### ⚔️ Compare Two Sites")
+        st.caption("Analyze and compare your site against a competitor. (Pro feature)")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        site_a = st.text_input("Your site", placeholder="https://yoursite.com", key="comp_a")
-    with col2:
-        site_b = st.text_input("Competitor", placeholder="https://competitor.com", key="comp_b")
+        col1, col2 = st.columns(2)
+        with col1:
+            site_a = st.text_input("Your site", placeholder="https://yoursite.com", key="comp_a")
+        with col2:
+            site_b = st.text_input("Competitor", placeholder="https://competitor.com", key="comp_b")
 
-    comp_pages = st.slider("Pages to crawl per site", 1, 10, 3, key="comp_pages")
+        comp_pages = st.slider("Pages to crawl per site", 1, 10, 3, key="comp_pages")
 
-    if st.button("⚔️ Compare", type="primary", use_container_width=True) and site_a and site_b:
-        if not _is_pro_user():
-            render_upgrade_card("Competitor Comparison")
-        else:
-            with st.spinner("Crawling and comparing both sites..."):
-                try:
-                    results = compare_sites(site_a, site_b, max_pages=comp_pages)
-                    report = generate_comparison_report(results)
-                    st.markdown(report, unsafe_allow_html=True)
-                except Exception as e:
-                    st.error(f"Comparison failed: {e}")
+        if st.button("⚔️ Compare", type="primary", use_container_width=True) and site_a and site_b:
+            if not _is_pro_user():
+                render_upgrade_card("Competitor Comparison")
+            else:
+                with st.spinner("Crawling and comparing both sites..."):
+                    try:
+                        results = compare_sites(site_a, site_b, max_pages=comp_pages)
+                        report = generate_comparison_report(results)
+                        st.markdown(report, unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"Comparison failed: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════
 # TAB: MONITORING
 # ══════════════════════════════════════════════════════════════════
-with tab_monitor:
-    st.markdown("### 📊 Site Monitoring")
-    st.caption("Track scores over time with scheduled snapshots.")
+if 'tab_monitor' in locals() or 'tab_monitor' in globals():
+    with tab_monitor:
+        st.markdown("### 📊 Site Monitoring")
+        st.caption("Track scores over time with scheduled snapshots.")
 
-    if not _is_pro_user():
-        render_upgrade_card("Site Monitoring")
-    else:
-        mon_url = st.text_input("Site to monitor", placeholder="https://yoursite.com", key="mon_url")
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("📊 Add to Monitoring", type="primary", use_container_width=True) and mon_url:
-                with st.spinner("Setting up monitor..."):
+        if not _is_pro_user():
+            render_upgrade_card("Site Monitoring")
+        else:
+            mon_url = st.text_input("Site to monitor", placeholder="https://yoursite.com", key="mon_url")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📊 Add to Monitoring", type="primary", use_container_width=True) and mon_url:
+                    with st.spinner("Setting up monitor..."):
+                        try:
+                            setup_monitor(mon_url)
+                            st.success(f"✅ Monitoring started for {mon_url}")
+                        except Exception as e:
+                            st.error(f"Failed: {e}")
+            with col2:
+                if st.button("📈 View Trends", use_container_width=True):
                     try:
-                        setup_monitor(mon_url)
-                        st.success(f"✅ Monitoring started for {mon_url}")
+                        monitors = load_monitors()
+                        if monitors:
+                            for site, data in monitors.items():
+                                st.markdown(f"**{site}**")
+                                trend = get_trend(site)
+                                if trend:
+                                    st.line_chart(trend)
+                        else:
+                            st.info("No monitors set up yet. Add a site above.")
                     except Exception as e:
-                        st.error(f"Failed: {e}")
-        with col2:
-            if st.button("📈 View Trends", use_container_width=True):
-                try:
-                    monitors = load_monitors()
-                    if monitors:
-                        for site, data in monitors.items():
-                            st.markdown(f"**{site}**")
-                            trend = get_trend(site)
-                            if trend:
-                                st.line_chart(trend)
-                    else:
-                        st.info("No monitors set up yet. Add a site above.")
-                except Exception as e:
-                    st.error(f"Could not load monitors: {e}")
+                        st.error(f"Could not load monitors: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════
 # TAB: SETTINGS
 # ══════════════════════════════════════════════════════════════════
-with tab_settings:
-    st.markdown("### ⚙️ Advanced Settings")
-    st.caption("For power users who want to use their own API keys.")
+if 'tab_settings' in locals() or 'tab_settings' in globals():
+    with tab_settings:
+        st.markdown("### ⚙️ Advanced Settings")
+        st.caption("For power users who want to use their own API keys.")
 
-    with st.expander("🔐 Subscription Status"):
-        plan = get_user_plan()
-        email = st.session_state.get("user_email", None)
-        if email:
-            st.markdown(f"**Email:** {email}  \n**Plan:** {plan.capitalize()}")
-            if plan == "free":
-                st.markdown(f"[⚡ Upgrade to Pro — $49/mo]({STRIPE_LINK_PRO})")
-                st.markdown(f"[🏢 Upgrade to Agency — $149/mo]({STRIPE_LINK_AGENCY})")
-        else:
-            st.info("Log in via the sidebar to verify your subscription.")
+        with st.expander("🔐 Subscription Status"):
+            plan = get_user_plan()
+            email = st.session_state.get("user_email", None)
+            if email:
+                st.markdown(f"**Email:** {email}  \\n**Plan:** {plan.capitalize()}")
+                if plan == "free":
+                    st.markdown(f"[⚡ Upgrade to Pro — $49/mo]({STRIPE_LINK_PRO})")
+                    st.markdown(f"[🏢 Upgrade to Agency — $149/mo]({STRIPE_LINK_AGENCY})")
+            else:
+                st.info("Log in via the sidebar to verify your subscription.")
 
-    with st.expander("🔑 Bring Your Own API Key (Optional)"):
+        with st.expander("🔑 Bring Your Own API Key (Optional)"):
+            st.markdown("""
+            Optionally use your own API key to run AI deep analysis with a specific engine.
+            SiteOracle uses DeepSeek by default — no key required for basic scans.
+            """)
+
+            key_names = ["DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+            for name in key_names:
+                server_has_key = bool(os.getenv(name, ""))
+                label = f"{name} {'✅ set by server' if server_has_key else ''}"
+                user_val = st.session_state.get(f"user_{name}", "")
+                entered = st.text_input(label, value=user_val, type="password",
+                                        placeholder="Paste your key here to override" if server_has_key else "Paste your key here",
+                                        key=f"input_{name}")
+                if entered:
+                    st.session_state[f"user_{name}"] = entered
+
+            st.caption("Your keys are only used for this session and never stored on our servers.")
+
+        st.markdown("---")
         st.markdown("""
-        Optionally use your own API key to run AI deep analysis with a specific engine.
-        SiteOracle uses DeepSeek by default — no key required for basic scans.
+        ### About SiteOracle
+
+        **Version**: 1.1  \n
+        **Capabilities**:  \n
+        - 🔧 Technical SEO (15+ rules-based checks, scored /100)  \n
+        - 📝 Answer Engine Optimization (7 dimensions)  \n
+        - 🤖 **AI Visibility Score** — checks which AI bots can see your site (ChatGPT, Claude, Perplexity, Gemini)  \n
+        - 🤖 Generative Engine Optimization (8 dimensions incl. AI Visibility)  \n
+        - 📍 Google Business Profile alignment (7 dimensions)  \n
+        - 🤖 AI deep analysis (via DeepSeek AI)  \n
+        - ⚔️ Competitive comparison (Pro)  \n
+        - 📊 Scheduled monitoring (Pro)  \n
+        - 📄 Beautiful HTML reports
+
+        Built by [SquadConsole](https://squadconsole.com)
         """)
-
-        key_names = ["DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
-        for name in key_names:
-            server_has_key = bool(os.getenv(name, ""))
-            label = f"{name} {'✅ set by server' if server_has_key else ''}"
-            user_val = st.session_state.get(f"user_{name}", "")
-            entered = st.text_input(label, value=user_val, type="password",
-                                    placeholder="Paste your key here to override" if server_has_key else "Paste your key here",
-                                    key=f"input_{name}")
-            if entered:
-                st.session_state[f"user_{name}"] = entered
-
-        st.caption("Your keys are only used for this session and never stored on our servers.")
-
-    st.markdown("---")
-    st.markdown("""
-    ### About SiteOracle
-
-    **Version**: 1.1  
-    **Capabilities**:  
-    - 🔧 Technical SEO (15+ rules-based checks, scored /100)  
-    - 📝 Answer Engine Optimization (7 dimensions)  
-    - 🤖 **AI Visibility Score** — checks which AI bots can see your site (ChatGPT, Claude, Perplexity, Gemini)  
-    - 🤖 Generative Engine Optimization (8 dimensions incl. AI Visibility)  
-    - 📍 Google Business Profile alignment (7 dimensions)  
-    - 🤖 AI deep analysis (via DeepSeek AI)  
-    - ⚔️ Competitive comparison (Pro)  
-    - 📊 Scheduled monitoring (Pro)  
-    - 📄 Beautiful HTML reports
-
-    Built by [SquadConsole](https://squadconsole.com)
-    """)
 
 
