@@ -404,8 +404,13 @@ if _result_url:
     </div>
     """, unsafe_allow_html=True)
 
-# ── HERO SECTION (hidden when embedded in squadconsole.com iframe or result mode) ──
-if not _embedded and not _result_url:
+# ── VS mode: head-to-head comparison ──
+_vs_raw = st.query_params.get("vs", "")
+_vs_sites = [s.strip() for s in _vs_raw.split(",") if s.strip()] if _vs_raw else []
+_is_vs_mode = len(_vs_sites) >= 2
+
+# ── HERO SECTION (hidden when embedded, result mode, or VS mode) ──
+if not _embedded and not _result_url and not _is_vs_mode:
     _hero_title = "🔥 Roast my site — give me the brutal truth" if _is_roast else "Which AI bots can read your website?"
     _hero_tagline = "SiteOracle will tear apart your site and tell you exactly what's broken. No sugarcoating." if _is_roast else "SiteOracle scans your site — technical SEO, AI visibility, answer engines, and local search — and tells you exactly what to fix."
     st.markdown(f"""
@@ -459,8 +464,22 @@ if not _embedded and not _result_url:
 
     st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
-# ── Tabs (hidden in result mode — shows clean scorecard) ──
-if not _result_url:
+# ── Tabs (hidden in result mode or VS mode — shows clean scorecard) ──
+if _is_vs_mode:
+    # VS mode header
+    st.markdown(f"""
+    <div style="text-align:center;padding:24px 16px 8px;">
+        <div style="font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#6366f1;margin-bottom:8px;">⚔️ Head to Head</div>
+        <div style="font-size:28px;font-weight:800;color:#e6edf3;">
+            <span style="color:#6366f1;">{_vs_sites[0]}</span>
+            <span style="color:#64748b;margin:0 12px;">vs</span>
+            <span style="color:#f59e0b;">{_vs_sites[1]}</span>
+        </div>
+        <div style="font-size:14px;color:#64748b;margin-top:4px;">Scoring both sites across all dimensions...</div>
+    </div>
+    """, unsafe_allow_html=True)
+    tab_analyze = st.container()
+elif _result_url:
     tab_visual, tab_analyze, tab_compare, tab_monitor, tab_settings = st.tabs([
         "👁️ Visual Audit",
         "🌐 Analyze Site",
@@ -482,8 +501,17 @@ else:
 # TAB: ANALYZE
 # ══════════════════════════════════════════════════════════════════
 with tab_analyze:
-    # ── In result mode: hide inputs, auto-run ──
-    if _result_url:
+    # ── In VS mode: auto-run both sites, show comparison ──
+    if _is_vs_mode:
+        url = "https://" + _vs_sites[0] if not _vs_sites[0].startswith("http") else _vs_sites[0]
+        url2 = "https://" + _vs_sites[1] if not _vs_sites[1].startswith("http") else _vs_sites[1]
+        run_btn = False
+        demo_btn = False
+        screenshot_file = None
+        max_pages = 3
+        use_ai = False
+        biz_name = ""
+    elif _result_url:
         url = "https://" + _result_url if not _result_url.startswith("http") else _result_url
         run_btn = False
         demo_btn = False
@@ -544,21 +572,26 @@ with tab_analyze:
                 st.markdown("### 📸 Screenshot Analysis")
                 st.markdown(result)
 
-    elif run_btn and url:
+    # ── Button click: prepare URL ──
+    if run_btn and url:
         if not url.startswith("http"):
             url = "https://" + url
 
-    # ── Auto-trigger for roast/url/result query params (no button needed) ──
-    if (_url_from_qp or _result_url) and not run_btn and not screenshot_file:
-        if _result_url:
+    # ── Auto-trigger for VS/roast/result query params (no button needed) ──
+    if not run_btn and (_is_vs_mode or _url_from_qp or _result_url) and not screenshot_file:
+        if _is_vs_mode:
+            pass  # Already set the URLs in the VS block above
+        elif _result_url:
             url = "https://" + _result_url if not _result_url.startswith("http") else _result_url
         else:
             url = _url_from_qp
             if not url.startswith("http"):
                 url = "https://" + url
 
-        # ── Rate limit check (Pro/Agency bypass) ──
-        if not _is_pro_user() and not _check_rate_limit():
+    # ── Execute scan (button click OR auto-trigger) ──
+    _should_scan = (run_btn or _is_vs_mode or _url_from_qp or _result_url) and not screenshot_file
+    if _should_scan and url:
+        if not _is_vs_mode and not _is_pro_user() and not _check_rate_limit():
             st.warning("You've used your 3 free scans for today. You get 3 free scans every 24 hours.")
             st.markdown(f"""
             <div class="upgrade-card">
@@ -571,6 +604,25 @@ with tab_analyze:
                 </a>
             </div>
             """, unsafe_allow_html=True)
+            st.stop()
+
+        # ── VS Mode: use comparison engine, show head-to-head ──
+        if _is_vs_mode:
+            with st.status("⚔️ Running head-to-head comparison...") as vs_status:
+                try:
+                    vs_results = compare_sites([url, url2], max_pages=3)
+                    vs_report = generate_comparison_report(vs_results)
+                    vs_status.update(label="✅ Comparison complete", state="complete")
+                    st.markdown(vs_report, unsafe_allow_html=True)
+                except Exception as e:
+                    vs_status.update(label="❌ Comparison failed", state="error")
+                    st.error(f"Comparison failed: {e}")
+
+            st.markdown("---")
+            st.markdown(
+                '<div style="text-align:center;"><a href="/?vs=' + _vs_sites[0] + ',' + _vs_sites[1] + '" style="color:#6366f1;font-weight:600;text-decoration:none;">🔄 Re-run comparison</a></div>',
+                unsafe_allow_html=True,
+            )
             st.stop()
 
         # ── Crawl ──
