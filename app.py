@@ -964,139 +964,139 @@ with tab_analyze:
 # ══════════════════════════════════════════════════════════════════
 # TAB: VISUAL AUDIT
 # ══════════════════════════════════════════════════════════════════
-with tab_visual:
-    st.markdown("""
-    <div style="background:linear-gradient(135deg,#1c2333,#161b22);border:1px solid #30363d;border-radius:16px;padding:28px 32px;margin-bottom:24px;">
-        <div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#ff6b6b;margin-bottom:8px;">NEW FEATURE</div>
-        <h2 style="font-size:1.6rem;font-weight:800;color:#e6edf3;margin:0 0 8px;">👁️ AI Visual Audit</h2>
-        <p style="color:#8b949e;margin:0;max-width:600px;">Upload a screenshot of any website and Claude AI will critique the design, CTA, trust signals, typography, and conversion elements — with a score and specific fixes.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    va_col1, va_col2 = st.columns([2, 1])
-    with va_col1:
-        visual_file = st.file_uploader(
-            "Upload a website screenshot",
-            type=["png", "jpg", "jpeg", "webp"],
-            help="Full-page or above-the-fold screenshots work best",
-            key="visual_audit_upload",
-        )
-    with va_col2:
-        st.markdown("")
-        st.markdown("")
+if 'tab_visual' in locals() or 'tab_visual' in globals():
+    with tab_visual:
         st.markdown("""
-        **Works best with:**
-        - Full-page screenshots
-        - Above-the-fold captures
-        - Mobile screenshots
-        - Landing pages & homepages
-        """)
-
-    if visual_file:
-        ext = visual_file.name.rsplit(".", 1)[-1]
-        tmp_path = f"/tmp/siteoracle_visual.{ext}"
-        Path(tmp_path).write_bytes(visual_file.getvalue())
-
-        col_img, col_btn = st.columns([3, 1])
-        with col_img:
-            st.image(visual_file, caption="Your screenshot", use_container_width=True)
-        with col_btn:
-            st.markdown("")
-            run_visual = st.button("🔍 Audit This Page", type="primary", use_container_width=True)
-
-        if run_visual:
-            if not os.getenv("ANTHROPIC_API_KEY"):
-                st.error("Claude API key not configured. Add ANTHROPIC_API_KEY to Railway environment variables.")
-            else:
-                with st.spinner("Claude is reviewing your site design... (~20 seconds)"):
-                    result = analyse_screenshot_visual(tmp_path)
-
-                if result["error"]:
-                    st.error(f"Visual audit failed: {result['error']}")
-                else:
-                    score = result["score"]
-                    score_color = "#22c55e" if score >= 70 else "#f59e0b" if score >= 40 else "#ef4444"
-
-                    st.markdown(f"""
-                    <div style="text-align:center;padding:24px;background:#161b22;border:1px solid #30363d;border-radius:12px;margin-bottom:24px;">
-                        <div style="font-size:64px;font-weight:800;color:{score_color};line-height:1;">{score}</div>
-                        <div style="color:#8b949e;font-size:14px;margin-top:4px;">Visual Design Score / 100</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    st.markdown(result["report"])
-
-                    # Email capture
-                    st.markdown("---")
-                    st.markdown("#### 📬 Email me this visual audit")
-                    vc1, vc2 = st.columns([3, 1])
-                    with vc1:
-                        va_email = st.text_input("Your email", placeholder="you@example.com", key="va_email", label_visibility="collapsed")
-                    with vc2:
-                        if st.button("Send", use_container_width=True) and va_email:
-                            st.success("✅ We'll add email delivery for visual audits soon — bookmark this page!")
-
-                    if not _is_pro_user():
-                        st.markdown(f"""
-                        <div class="upgrade-card" style="margin-top:24px;">
-                            <h2>⚡ Unlimited Visual Audits — Pro</h2>
-                            <p>Run visual audits on unlimited pages. Compare your site vs competitors. Get PDF reports.</p>
-                            <a href="{STRIPE_LINK_PRO}" target="_blank"
-                               style="display:inline-block;background:#ff5555;color:white;padding:10px 24px;
-                                      border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px;">
-                                Get Pro — $49/mo
-                            </a>
-                        </div>
-                        """, unsafe_allow_html=True)
-    else:
-        # Show example of what the audit produces
-        st.markdown("""
-        <div style="background:#161b22;border:1px dashed #30363d;border-radius:12px;padding:40px;text-align:center;color:#8b949e;">
-            <div style="font-size:48px;margin-bottom:12px;">📸</div>
-            <div style="font-size:16px;font-weight:600;color:#e6edf3;margin-bottom:8px;">Upload a screenshot to get started</div>
-            <div style="font-size:14px;">Claude will score your design and give specific recommendations to improve conversions</div>
+<div style="background:linear-gradient(135deg,#1c2333,#161b22);border:1px solid #30363d;border-radius:16px;padding:28px 32px;margin-bottom:24px;">
+            <div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#ff6b6b;margin-bottom:8px;">NEW FEATURE</div>
+            <h2 style="font-size:1.6rem;font-weight:800;color:#e6edf3;margin:0 0 8px;">👁️ AI Visual Audit</h2>
+            <p style="color:#8b949e;margin:0;max-width:600px;">Upload a screenshot of any website and Claude AI will critique the design, CTA, trust signals, typography, and conversion elements — with a score and specific fixes.</p>
         </div>
         """, unsafe_allow_html=True)
 
-        st.markdown("#### What Claude checks:")
-        ex1, ex2, ex3 = st.columns(3)
-        with ex1:
+        va_col1, va_col2 = st.columns([2, 1])
+        with va_col1:
+            visual_file = st.file_uploader(
+                "Upload a website screenshot",
+                type=["png", "jpg", "jpeg", "webp"],
+                help="Full-page or above-the-fold screenshots work best",
+                key="visual_audit_upload",
+            )
+        with va_col2:
+            st.markdown("")
+            st.markdown("")
             st.markdown("""
-            **Above the fold**
-            - Headline clarity
-            - CTA visibility
-            - Value proposition
-
-            **Typography**
-            - Readability
-            - Font hierarchy
-            - Contrast
-            """)
-        with ex2:
-            st.markdown("""
-            **Trust signals**
-            - Social proof
-            - Authority logos
-            - Security badges
-
-            **Layout**
-            - Visual hierarchy
-            - Whitespace
-            - Eye flow
-            """)
-        with ex3:
-            st.markdown("""
-            **Conversion**
-            - Button copy & placement
-            - Form friction
-            - Next step clarity
-
-            **Mobile**
-            - Touch targets
-            - Text sizing
-            - Layout adaptability
+            **Works best with:**
+            - Full-page screenshots
+            - Above-the-fold captures
+            - Mobile screenshots
+            - Landing pages & homepages
             """)
 
+        if visual_file:
+            ext = visual_file.name.rsplit(".", 1)[-1]
+            tmp_path = f"/tmp/siteoracle_visual.{ext}"
+            Path(tmp_path).write_bytes(visual_file.getvalue())
+
+            col_img, col_btn = st.columns([3, 1])
+            with col_img:
+                st.image(visual_file, caption="Your screenshot", use_container_width=True)
+            with col_btn:
+                st.markdown("")
+                run_visual = st.button("🔍 Audit This Page", type="primary", use_container_width=True)
+
+            if run_visual:
+                if not os.getenv("ANTHROPIC_API_KEY"):
+                    st.error("Claude API key not configured. Add ANTHROPIC_API_KEY to Railway environment variables.")
+                else:
+                    with st.spinner("Claude is reviewing your site design... (~20 seconds)"):
+                        result = analyse_screenshot_visual(tmp_path)
+
+                    if result["error"]:
+                        st.error(f"Visual audit failed: {result['error']}")
+                    else:
+                        score = result["score"]
+                        score_color = "#22c55e" if score >= 70 else "#f59e0b" if score >= 40 else "#ef4444"
+
+                        st.markdown(f"""
+                        <div style="text-align:center;padding:24px;background:#161b22;border:1px solid #30363d;border-radius:12px;margin-bottom:24px;">
+                            <div style="font-size:64px;font-weight:800;color:{score_color};line-height:1;">{score}</div>
+                            <div style="color:#8b949e;font-size:14px;margin-top:4px;">Visual Design Score / 100</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                        st.markdown(result["report"])
+
+                        # Email capture
+                        st.markdown("---")
+                        st.markdown("#### 📬 Email me this visual audit")
+                        vc1, vc2 = st.columns([3, 1])
+                        with vc1:
+                            va_email = st.text_input("Your email", placeholder="you@example.com", key="va_email", label_visibility="collapsed")
+                        with vc2:
+                            if st.button("Send", use_container_width=True) and va_email:
+                                st.success("✅ We'll add email delivery for visual audits soon — bookmark this page!")
+
+                        if not _is_pro_user():
+                            st.markdown(f"""
+                            <div class="upgrade-card" style="margin-top:24px;">
+                                <h2>⚡ Unlimited Visual Audits — Pro</h2>
+                                <p>Run visual audits on unlimited pages. Compare your site vs competitors. Get PDF reports.</p>
+                                <a href="{STRIPE_LINK_PRO}" target="_blank"
+                                   style="display:inline-block;background:#ff5555;color:white;padding:10px 24px;
+                                          border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px;">
+                                    Get Pro — $49/mo
+                                </a>
+                            </div>
+                            """, unsafe_allow_html=True)
+        else:
+            # Show example of what the audit produces
+            st.markdown("""
+            <div style="background:#161b22;border:1px dashed #30363d;border-radius:12px;padding:40px;text-align:center;color:#8b949e;">
+                <div style="font-size:48px;margin-bottom:12px;">📸</div>
+                <div style="font-size:16px;font-weight:600;color:#e6edf3;margin-bottom:8px;">Upload a screenshot to get started</div>
+                <div style="font-size:14px;">Claude will score your design and give specific recommendations to improve conversions</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("#### What Claude checks:")
+            ex1, ex2, ex3 = st.columns(3)
+            with ex1:
+                st.markdown("""
+                **Above the fold**
+                - Headline clarity
+                - CTA visibility
+                - Value proposition
+
+                **Typography**
+                - Readability
+                - Font hierarchy
+                - Contrast
+                """)
+            with ex2:
+                st.markdown("""
+                **Trust signals**
+                - Social proof
+                - Authority logos
+                - Security badges
+
+                **Layout**
+                - Visual hierarchy
+                - Whitespace
+                - Eye flow
+                """)
+            with ex3:
+                st.markdown("""
+                **Conversion**
+                - Button copy & placement
+                - Form friction
+                - Next step clarity
+
+                **Mobile**
+                - Touch targets
+                - Text sizing
+                - Layout adaptability
+                """)
 
 # ══════════════════════════════════════════════════════════════════
 # TAB: COMPARE
