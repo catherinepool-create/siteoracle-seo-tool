@@ -17,6 +17,7 @@ from reporter import generate_report, generate_html_report, generate_pdf_report,
 from comparison import compare_sites, generate_comparison_report
 from monitor import setup_monitor, load_monitors, save_snapshot, get_trend, generate_trend_report
 from auth import render_sidebar_auth, is_pro_or_above, is_agency, get_user_plan, render_upgrade_card, STRIPE_LINK_PRO, STRIPE_LINK_AGENCY
+from ad_generator import generate_ad_script, generate_video_ad, get_available_formats
 from emailer import send_scan_report
 from visual_audit import analyse_screenshot_visual
 from screenshot import capture_screenshot
@@ -727,6 +728,95 @@ with tab_analyze:
                     st.info("📋 Email delivery will be live shortly — your report is below.")
         else:
             st.success("✅ Report emailed — check your inbox.")
+
+        # ── AI Ad Generator — turn this scan into a video ad ──
+        with st.expander("🎬 AI Ad Generator — Turn This Site Into a Video Ad", expanded=False):
+            st.markdown("""
+            <div style="margin-bottom:12px;color:#94a3b8;font-size:14px;">
+            Got your scan results? Now turn them into a 15-second UGC video ad
+            using your site's value proposition. Powered by Higgsfield AI.
+            </div>
+            """, unsafe_allow_html=True)
+
+            ad_formats = get_available_formats()
+            fmt_names = {v["name"]: k for k, v in ad_formats.items()}
+
+            ad_col1, ad_col2 = st.columns([2, 1])
+            with ad_col1:
+                selected_format = st.selectbox(
+                    "Ad format",
+                    options=list(fmt_names.keys()),
+                    index=0,
+                    key=f"ad_format_{url[:20]}",
+                )
+                format_key = fmt_names[selected_format]
+                st.caption(ad_formats[format_key]["description"])
+                st.caption(f"⏱️ Estimated: {ad_formats[format_key]['duration']}")
+
+                ad_mode = st.selectbox(
+                    "Marketing Studio mode",
+                    options=["ugc", "product_showcase", "tv_spot", "ugc_unboxing",
+                             "product_review", "ugc_how_to"],
+                    index=0,
+                    key=f"ad_mode_{url[:20]}",
+                    help="The video generation mode for Higgsfield Marketing Studio",
+                )
+
+            with ad_col2:
+                st.markdown("##### 📝 Script preview")
+                script = generate_ad_script(
+                    site_url=url,
+                    format_name=format_key or "ugc",
+                    brand_name="",
+                    value_prop=f"{url.replace('https://','').rstrip('/')} — AI visibility score {ai_vis_score}/100",
+                    keywords=["search engine optimization", "website audit", "SEO tool",
+                              "AI visibility", f"score {combined}/100"],
+                    tone="professional",
+                )
+                for i, hook in enumerate(script["suggested_hooks"][:2], 1):
+                    st.markdown(f"**Hook {i}:** {hook}")
+                st.markdown(f"**Tone:** {script['tone']}")
+                st.markdown(f"**Structure:** {', '.join(script['script_outline'])}")
+
+            # Only enable generation for Pro users (Higgsfield costs money)
+            if _is_pro_user():
+                product_url_input = st.text_input(
+                    "Product URL (optional — for product-specific ads)",
+                    placeholder="https://shop.example.com/product",
+                    key=f"ad_product_{url[:20]}",
+                )
+                if st.button("🎬 Generate Ad Video", type="primary", use_container_width=True,
+                            key=f"ad_gen_{url[:20]}"):
+                    with st.status("🤖 Generating AI ad via Higgsfield...") as ad_status:
+                        ad_status.update(label="Creating ad...", state="running")
+                        result = generate_video_ad(
+                            script=script,
+                            mode=ad_mode,
+                            product_url=product_url_input,
+                            duration=15,
+                            aspect_ratio="9:16",
+                        )
+                        if result["success"]:
+                            ad_status.update(label="✅ Ad generated!", state="complete")
+                            st.markdown(result.get("job_output", ""))
+                            st.success("Video ad created! Check Higgsfield dashboard for download.")
+                        else:
+                            msg = result.get("results", [{}])[-1].get("message", "Generation failed")
+                            if "cli_not_found" in str(result):
+                                ad_status.update(label="⚠️ Higgsfield CLI not available", state="error")
+                                st.info("The Higgsfield CLI isn't installed on this server. "
+                                       "We'll set this up on the production deployment.")
+                            else:
+                                ad_status.update(label="⚠️ Generation issue", state="error")
+                                st.info(f"Generation note: {msg[:200]}")
+            else:
+                st.markdown(f"""
+                <div style="background:#1e293b;border:1px dashed #f59e0b;border-radius:10px;padding:16px;text-align:center;">
+                    <div style="font-size:14px;color:#f59e0b;font-weight:600;margin-bottom:4px;">🎬 Generate a real AI video ad — Pro Feature</div>
+                    <div style="font-size:13px;color:#94a3b8;">Upgrade to Pro to generate actual AI video ads from your scan results. Powered by Higgsfield AI Marketing Studio.</div>
+                    <a href="{STRIPE_LINK_PRO}" target="_blank" style="display:inline-block;margin-top:8px;background:#ff5555;color:white;padding:8px 20px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px;">⚡ Get Pro — $49/mo</a>
+                </div>
+                """, unsafe_allow_html=True)
 
         # ── Priority Fix List ──
         priority_list = _build_priority_fix_list(seo, aeo, geo, gbp)
