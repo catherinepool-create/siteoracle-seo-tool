@@ -946,6 +946,8 @@ with tab_analyze:
         # ── Download Reports ──
         st.markdown("---")
         report_base = f"siteoracle_{url.replace('https://','').replace('/','_')[:30]}"
+        
+        # Free users get HTML + text. PDF is Pro-only.
         col1, col2, col3 = st.columns(3)
         with col1:
             html_report = generate_html_report(url, pages, seo, aeo, geo, gbp, ai_text)
@@ -954,12 +956,21 @@ with tab_analyze:
             txt_report = generate_report(url, pages, seo, aeo, geo, gbp, ai_text)
             st.download_button("📝 Text Report", txt_report, file_name=f"{report_base}.txt", mime="text/plain", use_container_width=True)
         with col3:
-            with st.spinner("Generating PDF..."):
-                pdf_bytes = generate_pdf_report(url, pages, seo, aeo, geo, gbp, ai_text)
-            if pdf_bytes:
-                st.download_button("📕 PDF Report", pdf_bytes, file_name=f"{report_base}.pdf", mime="application/pdf", use_container_width=True)
+            if _is_pro_user():
+                with st.spinner("Generating Pro PDF report..."):
+                    pdf_bytes = generate_pdf_report(url, pages, seo, aeo, geo, gbp, ai_text)
+                if pdf_bytes:
+                    st.download_button("📕 Pro PDF Report", pdf_bytes, file_name=f"{report_base}.pdf", mime="application/pdf", use_container_width=True)
+                else:
+                    st.button("📕 PDF (unavailable)", disabled=True, use_container_width=True)
             else:
-                st.button("📕 PDF (unavailable)", disabled=True, use_container_width=True)
+                st.markdown(f"""
+                <div style="background:#1e293b;border:1px dashed #f59e0b;border-radius:10px;padding:12px;text-align:center;">
+                    <div style="font-size:14px;color:#f59e0b;font-weight:600;margin-bottom:4px;">📕 PDF Report — Pro Feature</div>
+                    <div style="font-size:13px;color:#94a3b8;margin-bottom:8px;">Get a branded PDF report you can share with clients.</div>
+                    <a href="{STRIPE_LINK_PRO}" target="_blank" style="display:inline-block;background:#ff5555;color:white;padding:6px 16px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px;">⚡ Get Pro — $49/mo</a>
+                </div>
+                """, unsafe_allow_html=True)
 
         # ── Email Capture ──
         st.markdown("---")
