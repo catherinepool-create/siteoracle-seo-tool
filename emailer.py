@@ -1,4 +1,10 @@
-"""Resend email integration — triggers drip sequence after a free scan."""
+"""Email integration — sends via Brevo API (replaces Resend).
+
+Triggered after a free scan to deliver the report + start a 4-email drip.
+Also handles partnership outreach emails.
+
+Requires BREVO_API_KEY in environment.
+"""
 
 import os
 import json
@@ -6,35 +12,79 @@ import urllib.request
 import urllib.error
 
 
-RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 FROM_EMAIL = "Catherine <catherine@squadconsole.com>"
+FROM_NAME = "Catherine"
+FROM_ADDRESS = "catherine@squadconsole.com"
 
 
-def _send(to: str, subject: str, html: str) -> bool:
-    """Send a single email via Resend API. Returns True on success."""
-    if not RESEND_API_KEY:
+def _send(to: str, subject: str, html_content: str) -> bool:
+    """Send a single email via Brevo API. Returns True on success."""
+    if not BREVO_API_KEY:
         return False
     payload = json.dumps({
-        "from": FROM_EMAIL,
-        "to": [to],
+        "sender": {
+            "name": FROM_NAME,
+            "email": FROM_ADDRESS,
+        },
+        "to": [{"email": to}],
         "subject": subject,
-        "html": html,
+        "htmlContent": html_content,
     }).encode()
     req = urllib.request.Request(
-        "https://api.resend.com/emails",
+        "https://api.brevo.com/v3/smtp/email",
         data=payload,
         headers={
-            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "api-key": BREVO_API_KEY,
             "Content-Type": "application/json",
+            "Accept": "application/json",
         },
         method="POST",
     )
     try:
-        urllib.request.urlopen(req, timeout=8)
+        urllib.request.urlopen(req, timeout=10)
         return True
-    except urllib.error.HTTPError:
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        print(f"Brevo API error ({e.code}): {body[:300]}")
         return False
-    except Exception:
+    except Exception as e:
+        print(f"Brevo send error: {e}")
+        return False
+
+
+def send_partnership_email(to: str, subject: str, body_text: str) -> bool:
+    """Send a plain-text partnership outreach email via Brevo."""
+    if not BREVO_API_KEY:
+        return False
+    payload = json.dumps({
+        "sender": {
+            "name": FROM_NAME,
+            "email": FROM_ADDRESS,
+        },
+        "to": [{"email": to}],
+        "subject": subject,
+        "textContent": body_text,
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=payload,
+        headers={
+            "api-key": BREVO_API_KEY,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        urllib.request.urlopen(req, timeout=10)
+        return True
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        print(f"Brevo partnership send error ({e.code}): {body[:300]}")
+        return False
+    except Exception as e:
+        print(f"Brevo partnership send error: {e}")
         return False
 
 
@@ -49,7 +99,7 @@ def send_scan_report(
     combined: int,
     top_issues: list,
 ) -> bool:
-    """Email 1 — immediate scan report."""
+    """Email 1 — immediate scan report via Brevo."""
     score_color = "#22c55e" if combined >= 70 else "#f59e0b" if combined >= 40 else "#ef4444"
     issues_html = "".join(
         f'<tr><td style="padding:10px 0; border-bottom:1px solid #30363d; color:#e6edf3;">'
@@ -58,8 +108,7 @@ def send_scan_report(
         f'<span style="color:#8b949e;font-size:13px;">{i.get("detail","")}</span></td></tr>'
         for i in top_issues[:3]
     )
-    html = f"""
-<!DOCTYPE html><html><body style="margin:0;padding:0;background:#0e1117;font-family:Inter,sans-serif;">
+    html = f"""<!DOCTYPE html><html><body style="margin:0;padding:0;background:#0e1117;font-family:Inter,sans-serif;">
 <div style="max-width:600px;margin:0 auto;padding:40px 20px;">
   <div style="text-align:center;margin-bottom:32px;">
     <span style="font-size:28px;font-weight:800;color:#e6edf3;">🔍 SiteOracle</span>
