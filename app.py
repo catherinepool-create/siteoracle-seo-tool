@@ -27,6 +27,73 @@ st.set_page_config(
     layout="wide",
 )
 
+# ── JSON API Mode ──────────────────────────────────────────────
+# If ?format=json, run the scan and return raw JSON instead of rendering UI.
+# Used by the Canva app for inline scan results.
+_API_FORMAT = st.query_params.get("format", "")
+if _API_FORMAT == "json":
+    _api_url = st.query_params.get("url", "").strip()
+    if _api_url:
+        if not _api_url.startswith("http"):
+            _api_url = "https://" + _api_url
+        _api_max_pages = int(st.query_params.get("pages", "5"))
+        _api_biz = st.query_params.get("biz", "") or None
+
+        import sys as _sys
+        from crawler import crawl as _crawl, fetch_page as _fetch_page
+        from check_seo import check_technical_seo as _seo
+        from check_aeo import check_aeo as _aeo
+        from check_geo import check_geo as _geo
+        from check_gbp import check_gbp as _gbp
+
+        _api_pages = _crawl(_api_url, max_pages=_api_max_pages)
+        if _api_pages:
+            _api_html, _ = _fetch_page(_api_url)
+            _api_biz_info = {"name": _api_biz} if _api_biz else None
+            _api_seo = _seo(_api_pages)
+            _api_aeo = _aeo(_api_pages)
+            _api_geo = _geo(_api_pages, html=_api_html, url=_api_url)
+            _api_gbp = _gbp(_api_pages, _api_biz_info)
+            _api_ai_vis = _api_geo.get("dimensions", {}).get("ai_visibility", {}).get("score", 0)
+            _api_combined = round(
+                _api_seo["score"] * 0.20 + _api_aeo["score"] * 0.15 +
+                _api_geo["score"] * 0.25 + _api_gbp["score"] * 0.10 + _api_ai_vis * 0.30
+            )
+            _api_result = {
+                "url": _api_url,
+                "scores": {
+                    "seo": _api_seo["score"], "aeo": _api_aeo["score"],
+                    "geo": _api_geo["score"], "gbp": _api_gbp["score"],
+                    "ai_visibility": _api_ai_vis, "combined": _api_combined,
+                },
+                "issues": {
+                    "seo": _api_seo.get("issues", []),
+                    "aeo": _api_aeo.get("issues", []),
+                    "geo": _api_geo.get("issues", []),
+                    "gbp": _api_gbp.get("issues", []),
+                },
+                "passes": {
+                    "seo": _api_seo.get("passes", []),
+                    "aeo": _api_aeo.get("passes", []),
+                    "geo": _api_geo.get("passes", []),
+                    "gbp": _api_gbp.get("passes", []),
+                },
+                "summary": {
+                    "pages_crawled": len(_api_pages),
+                    "total_issues": (
+                        len(_api_seo.get("issues", [])) +
+                        len(_api_aeo.get("issues", [])) +
+                        len(_api_geo.get("issues", [])) +
+                        len(_api_gbp.get("issues", []))
+                    ),
+                },
+            }
+        else:
+            _api_result = {"error": f"Could not fetch {_api_url}"}
+
+        st.json(_api_result)
+        st.stop()
+
 # ── Rate Limiting ──────────────────────────────────────────────
 RATE_LIMIT_FILE = Path("/tmp/siteoracle_ratelimit.json")
 
