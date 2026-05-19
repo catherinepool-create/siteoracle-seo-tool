@@ -456,6 +456,64 @@ st.markdown("""
 # ── Sidebar Auth ────────────────────────────────────────────────
 render_sidebar_auth()
 
+# ══════════════════════════════════════════════════════════════════
+# JSON API: Canva / external tools → ?format=json&url=...
+# ══════════════════════════════════════════════════════════════════
+_api_fmt = st.query_params.get("format", "")
+_api_url = st.query_params.get("url", "")
+if _api_fmt == "json" and _api_url:
+    from urllib.parse import urlparse
+    from crawler import crawl, fetch_page
+    from check_seo import check_technical_seo
+    from check_aeo import check_aeo
+    from check_geo import check_geo
+    from check_gbp import check_gbp
+    target = _api_url
+    if not target.startswith("http"):
+        target = "https://" + target
+    try:
+        pages = crawl(target, max_pages=3)
+        if not pages:
+            st.json({"error": "Could not fetch site", "url": target})
+            st.stop()
+        homepage_html, _ = fetch_page(target)
+        seo = check_technical_seo(pages)
+        aeo = check_aeo(pages)
+        geo = check_geo(pages, html=homepage_html, url=target)
+        biz_name = urlparse(target).netloc.replace("www.", "").split(".")[0].title()
+        gbp = check_gbp(pages, {"name": biz_name})
+        ai_vis_score = geo.get("dimensions", {}).get("ai_visibility", {}).get("score", 0)
+        combined = round(seo["score"]*0.20 + aeo["score"]*0.15 + geo["score"]*0.25 + gbp["score"]*0.10 + ai_vis_score*0.30)
+        issues = (seo.get("issues", []) + aeo.get("issues", []) + geo.get("issues", []))[:6]
+        priority = []
+        for i, iss in enumerate(issues, 1):
+            if isinstance(iss, str):
+                priority.append({"num": i, "severity": "warning", "check": iss, "detail": ""})
+            else:
+                priority.append({
+                    "num": i,
+                    "severity": iss.get("severity", "warning"),
+                    "check": iss.get("check", str(iss)),
+                    "detail": iss.get("detail", iss.get("suggestion", "")),
+                })
+        st.json({
+            "url": target,
+            "scores": {
+                "seo": seo["score"],
+                "aeo": aeo["score"],
+                "geo": geo["score"],
+                "gbp": gbp["score"],
+                "ai_visibility": ai_vis_score,
+                "combined": combined,
+            },
+            "priority": priority,
+            "ai_bots_blocked": geo.get("dimensions", {}).get("ai_visibility", {}).get("blocked_bots", []),
+            "ai_bots_allowed": geo.get("dimensions", {}).get("ai_visibility", {}).get("allowed_bots", []),
+        })
+    except Exception as e:
+        st.json({"error": str(e), "url": target})
+    st.stop()
+
 # ── Detect embedded mode (iframe on squadconsole.com) ──
 _embedded = st.query_params.get("embedded", False)
 
