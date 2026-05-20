@@ -484,18 +484,27 @@ if _api_fmt == "json" and _api_url:
         gbp = check_gbp(pages, {"name": biz_name})
         ai_vis_score = geo.get("dimensions", {}).get("ai_visibility", {}).get("score", 0)
         combined = round(seo["score"]*0.20 + aeo["score"]*0.15 + geo["score"]*0.25 + gbp["score"]*0.10 + ai_vis_score*0.30)
-        issues = (seo.get("issues", []) + aeo.get("issues", []) + geo.get("issues", []))[:6]
-        priority = []
-        for i, iss in enumerate(issues, 1):
-            if isinstance(iss, str):
-                priority.append({"num": i, "severity": "warning", "check": iss, "detail": ""})
-            else:
-                priority.append({
-                    "num": i,
-                    "severity": iss.get("severity", "warning"),
-                    "check": iss.get("check", str(iss)),
-                    "detail": iss.get("detail", iss.get("suggestion", "")),
-                })
+
+        def _format_issues(raw_list, default_severity="warning"):
+            formatted = []
+            for iss in raw_list:
+                if isinstance(iss, str):
+                    formatted.append({"check": iss, "detail": "", "severity": default_severity})
+                else:
+                    formatted.append({
+                        "check": iss.get("check", str(iss)),
+                        "detail": iss.get("detail", iss.get("suggestion", "")),
+                        "severity": iss.get("severity", default_severity),
+                    })
+            return formatted
+
+        seo_issues = seo.get("issues", [])
+        aeo_issues = aeo.get("issues", [])
+        geo_issues = geo.get("issues", [])
+        gbp_issues = gbp.get("issues", [])
+
+        total_issues = len(seo_issues) + len(aeo_issues) + len(geo_issues) + len(gbp_issues)
+
         st.json({
             "url": target,
             "scores": {
@@ -506,7 +515,16 @@ if _api_fmt == "json" and _api_url:
                 "ai_visibility": ai_vis_score,
                 "combined": combined,
             },
-            "priority": priority,
+            "issues": {
+                "seo": _format_issues(seo_issues),
+                "aeo": _format_issues(aeo_issues),
+                "geo": _format_issues(geo_issues),
+                "gbp": _format_issues(gbp_issues),
+            },
+            "summary": {
+                "pages_crawled": len(pages),
+                "total_issues": total_issues,
+            },
             "ai_bots_blocked": geo.get("dimensions", {}).get("ai_visibility", {}).get("blocked_bots", []),
             "ai_bots_allowed": geo.get("dimensions", {}).get("ai_visibility", {}).get("allowed_bots", []),
         })
