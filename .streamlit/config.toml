@@ -2,6 +2,9 @@
 enableStaticServing = true
 port = 8501
 address = "0.0.0.0"
+# CORS disabled for Canva app iframe access
+# Restrict origins at the nginx/reverse-proxy layer if needed
+enableCORS = false
 
 [browser]
 gatherUsageStats = false
