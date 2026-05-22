@@ -24,6 +24,7 @@ RUN useradd -m -u 1000 siteoracle && chown -R siteoracle:siteoracle /app \
 USER siteoracle
 
 EXPOSE 8501
+EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8080/_stcore/health || exit 1
