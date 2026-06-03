@@ -21,6 +21,7 @@ from ad_generator import generate_ad_script, generate_video_ad, get_available_fo
 from emailer import send_scan_report
 from visual_audit import analyse_screenshot_visual
 from screenshot import capture_screenshot
+from check_ai_content import check_ai_content, check_robots_txt
 
 st.set_page_config(
     page_title="SiteOracle",
@@ -567,6 +568,7 @@ if not _embedded and not _result_url and not _is_vs_mode:
         <span class="badge">🤖 AI Visibility</span>
         <span class="badge">📝 Answer Engines</span>
         <span class="badge">📍 Local Search</span>
+        <span class="badge">🧠 AI Content Check</span>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -594,6 +596,11 @@ if not _embedded and not _result_url and not _is_vs_mode:
         <div class="name">PDF Reports</div>
         <div class="desc">Download HTML, text, or PDF reports — share them with clients or your team.</div>
     </div>
+    <div class="feature-card">
+        <div class="emoji">🧠</div>
+        <div class="name">AI Content Detection</div>
+        <div class="desc">Detects AI-generated content patterns in your text — sentence variance, vocabulary, and readability signals.</div>
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -601,7 +608,7 @@ if not _embedded and not _result_url and not _is_vs_mode:
     st.markdown("""
 <div class="proof-row">
     <div class="proof-item"><div class="num">50+</div><div class="label">Checks Per Site</div></div>
-    <div class="proof-item"><div class="num">4</div><div class="label">Dimensions Scored</div></div>
+    <div class="proof-item"><div class="num">6</div><div class="label">Dimensions Scored</div></div>
     <div class="proof-item"><div class="num">8</div><div class="label">AI Bots Tracked</div></div>
 </div>
 """, unsafe_allow_html=True)
@@ -793,7 +800,18 @@ with tab_analyze:
             status.update(label="✅ GEO + AI Visibility done")
             biz_info = {"name": biz_name} if biz_name else None
             gbp = check_gbp(pages, biz_info)
-            status.update(label="✅ GBP done", state="complete")
+            status.update(label="✅ GBP done")
+            robots_url = url.rstrip("/") + "/robots.txt"
+            robots_content = None
+            try:
+                import requests
+                r = requests.get(robots_url, headers={"User-Agent": "SiteOracle/1.0"}, timeout=5)
+                if r.status_code == 200:
+                    robots_content = r.text
+            except Exception:
+                pass
+            ai_content = check_ai_content(pages, html=homepage_html, robots_content=robots_content)
+            status.update(label="✅ AI Content Detection done", state="complete")
 
         # ── Visual Audit (auto-screenshot, Pro only) ──
         vis_score = 0
@@ -822,7 +840,8 @@ with tab_analyze:
 
         # ── Scores ──
         ai_vis_score = geo.get("dimensions", {}).get("ai_visibility", {}).get("score", 0)
-        combined = round(seo["score"]*0.20 + aeo["score"]*0.15 + geo["score"]*0.25 + gbp["score"]*0.10 + ai_vis_score*0.30)
+        ai_content_score = ai_content.get("score") or 0
+        combined = round(seo["score"]*0.18 + aeo["score"]*0.13 + geo["score"]*0.22 + gbp["score"]*0.08 + ai_vis_score*0.25 + ai_content_score*0.14)
 
         s_c, a_c, g_c, gbp_c, ai_c, vis_c, comb_c = st.columns(7)
         def _score_color(s): return "#22c55e" if s >= 70 else "#f59e0b" if s >= 40 else "#ef4444"
@@ -837,6 +856,8 @@ with tab_analyze:
         with ai_c:
             st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:{_score_color(ai_vis_score)}">{ai_vis_score}</div><div class="metric-label">AI Visibility</div></div>', unsafe_allow_html=True)
         with vis_c:
+            aic_col = _score_color(ai_content_score)
+            st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:{aic_col}">{ai_content_score}</div><div class="metric-label">AI Content</div></div>', unsafe_allow_html=True)
             vis_disp = str(vis_score) if vis_score else "—"
             vis_col = _score_color(vis_score) if vis_score else "#64748b"
             st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:{vis_col}">{vis_disp}</div><div class="metric-label">Visual Design</div></div>', unsafe_allow_html=True)
@@ -1005,6 +1026,30 @@ with tab_analyze:
             _show_dimensions(geo)
         with st.expander("📍 Google Business Profile Alignment"):
             _show_dimensions(gbp)
+        with st.expander("🤖 AI Content Detection — Is Your Content Human-Grade?", expanded=True):
+            aic_issues = ai_content.get("issues", [])
+            aic_passes = ai_content.get("passes", [])
+            aic_score = ai_content.get("score") or 0
+            aic_color = "#22c55e" if aic_score < 30 else "#f59e0b" if aic_score < 60 else "#ef4444"
+            st.markdown(f'<div class="metric-box" style="margin-bottom:16px;"><div class="metric-value" style="color:{aic_color};font-size:36px;">{aic_score}</div><div class="metric-label">AI Content Detection Score (lower = more human)</div></div>', unsafe_allow_html=True)
+            conf = ai_content.get("text_analysis", {}).get("confidence", "low")
+            st.caption(f"Confidence: {conf.upper()}. {'Full site scan recommended for best accuracy.' if conf == 'low' else ''}")
+            if aic_issues:
+                st.markdown("**Issues**")
+                for issue in aic_issues:
+                    e = {"critical":"🔴","warning":"🟡","info":"🔵"}.get(issue["severity"],"⚪")
+                    st.markdown(f"{e} **{issue['check']}** — {issue['detail']}")
+            if aic_passes:
+                st.markdown("**Passes**")
+                for p in aic_passes:
+                    st.markdown(f"✅ {p}")
+            if not aic_issues and not aic_passes:
+                st.info("Insufficient text content on this site to analyze.")
+            if aic_score >= 40:
+                st.markdown("""<div style="background:#1e293b;border:1px solid #f59e0b;border-radius:10px;padding:12px;margin-top:12px;">
+                <div style="font-size:13px;color:#f59e0b;font-weight:600;">💡 Tip</div>
+                <div style="font-size:13px;color:#94a3b8;">If this is human-written content, the AI detection signals may be triggered by highly structured writing. Consider adding variety in sentence length and paragraph structure — it helps both readers and search engines.</div>
+            </div>""", unsafe_allow_html=True)
         if ai_text:
             with st.expander("🧠 AI Deep Analysis", expanded=True):
                 st.markdown(ai_text)
