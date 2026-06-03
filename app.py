@@ -1044,6 +1044,26 @@ with tab_analyze:
             st.markdown(f'<div class="metric-box" style="margin-bottom:16px;"><div class="metric-value" style="color:{aic_color};font-size:36px;">{aic_score}</div><div class="metric-label">AI Content Detection Score (lower = more human)</div></div>', unsafe_allow_html=True)
             conf = ai_content.get("text_analysis", {}).get("confidence", "low")
             st.caption(f"Confidence: {conf.upper()}. {'Full site scan recommended for best accuracy.' if conf == 'low' else ''}")
+            
+            # Show Phase 3 platform flags
+            platform_flags = ai_content.get("platform_flags", [])
+            if platform_flags:
+                st.markdown("**Platform Risk Flags**")
+                for pf in platform_flags:
+                    emoji = "🔴" if pf["severity"] == "critical" else "🟡"
+                    st.markdown(f"{emoji} **{pf['platform'].title()}**: {pf['message'][:120]}...")
+                    if pf.get("policy_url"):
+                        st.caption(f"[View policy]({pf['policy_url']})")
+            
+            # Show Phase 4 disclosure info
+            disclosure = ai_content.get("disclosure", {})
+            if disclosure.get("checks"):
+                st.markdown("**Disclosure Compliance**")
+                for name, check in disclosure.get("checks", {}).items():
+                    icon = "✅" if check["status"] == "PRESENT" else "❌"
+                    st.markdown(f"{icon} **{name.replace('_', ' ').title()}**: {check['detail'][:80]}")
+            
+            # Show issues
             if aic_issues:
                 st.markdown("**Issues**")
                 for issue in aic_issues:
@@ -1055,6 +1075,17 @@ with tab_analyze:
                     st.markdown(f"✅ {p}")
             if not aic_issues and not aic_passes:
                 st.info("Insufficient text content on this site to analyze.")
+            
+            # Trust Badge embed (for sites that score well)
+            if aic_score is not None and aic_score < 40:
+                from check_ai_content import generate_trust_badge_data
+                badge = generate_trust_badge_data(aic_score, url)
+                st.markdown("---")
+                st.markdown("#### 🛡️ Trust Badge")
+                st.caption("Your site qualifies for the Verified Human Content badge. Embed this on your site:")
+                st.markdown(badge.get("badge_html", ""), unsafe_allow_html=True)
+                st.code(badge.get("embed_script", ""), language="html")
+            
             if aic_score >= 40:
                 st.markdown("""<div style="background:#1e293b;border:1px solid #f59e0b;border-radius:10px;padding:12px;margin-top:12px;">
                 <div style="font-size:13px;color:#f59e0b;font-weight:600;">💡 Tip</div>

@@ -416,6 +416,10 @@ def check_ai_content(pages, html=None, robots_content=None, sitemap_content=None
     # ── Phase 3C: Platform Flags ──
     platform_flags = []
     
+    # ── Phase 4A: Disclosure Compliance ──
+    disclosure_results = check_disclosure_compliance(html, pages)
+    disclosure_score = disclosure_results.get("score", 0)
+    
     # Final weighted score (0-100 scale)
     if text_score is not None:
         ml_weight = 15 if ml_score is not None else 0
@@ -429,6 +433,7 @@ def check_ai_content(pages, html=None, robots_content=None, sitemap_content=None
             velocity_score * 0.4 +                  # Phase 2B: velocity
             author_score * 0.5 +                    # Phase 2C: authors
             image_score * 0.3 +                     # Phase 3B: images
+            disclosure_score +                        # Phase 4A: disclosure compliance
             meta_risk                                # Phase 1: meta tags
         )))
     else:
@@ -530,6 +535,7 @@ def check_ai_content(pages, html=None, robots_content=None, sitemap_content=None
         "ml_classifier": ml_result,
         "image_detection": image_result,
         "platform_flags": platform_flags,
+        "disclosure": disclosure_results,
         "dimensions": {
             "ai_content_detection": {
                 "score": final_score or 0,
@@ -753,6 +759,179 @@ def check_platform_flags(ai_score):
             })
     
     return flags
+
+
+# ── Phase 4A: Disclosure Compliance Check ──
+
+
+def check_disclosure_compliance(html, pages):
+    """
+    Check if a site has AI content disclosure signals.
+    
+    Checks:
+    1. AI content policy page (/ai-policy, /ai-disclosure, /content-policy)
+    2. schema.org/generatedBy JSON-LD markup
+    3. C2PA / content credentials metadata signals
+    4. noai robots meta tags
+    5. <meta name="ai-generated"> tag
+    
+    Returns:
+        dict with compliance results
+    """
+    checks = {}
+    
+    # 1. Check for ai-generated meta tag
+    if html:
+        ai_gen = re.search(r'<meta[^>]*name=["\']ai-generated["\'][^>]*content=["\']([^"\']*)["\']', html, re.IGNORECASE)
+        checks["ai_generated_meta"] = {
+            "status": "PRESENT" if ai_gen else "MISSING",
+            "detail": 'Meta tag ai-generated = "%s"' % ai_gen.group(1) if ai_gen else "No <meta name='ai-generated'> tag found",
+        }
+        
+        # 2. Check for noai robots meta
+        robots_meta = re.search(r'<meta[^>]*name=["\']robots["\'][^>]*content=["\']([^"\']*)["\']', html, re.IGNORECASE)
+        if robots_meta and ("noai" in robots_meta.group(1).lower() or "noimageai" in robots_meta.group(1).lower()):
+            checks["robots_noai"] = {
+                "status": "PRESENT",
+                "detail": "robots meta contains noai/noimageai directive",
+            }
+        else:
+            checks["robots_noai"] = {
+                "status": "MISSING",
+                "detail": "No AI opt-out in robots meta",
+            }
+    
+    # 3. Check for schema.org/generatedBy in any page
+    generated_by_found = False
+    for page in (pages or []):
+        for p in page.get("paragraphs", []):
+            if "generatedBy" in p or "generatedby" in p.lower():
+                generated_by_found = True
+                break
+    checks["schema_generated_by"] = {
+        "status": "PRESENT" if generated_by_found else "MISSING",
+        "detail": "schema.org/generatedBy found" if generated_by_found else "No schema.org/generatedBy markup detected",
+    }
+    
+    # 4. Check for C2PA signals in image URLs
+    c2pa_signals = 0
+    for page in (pages or []):
+        for img in page.get("images", []):
+            src = img.get("src", "")
+            if "c2pa" in src.lower() or "contentcredentials" in src.lower():
+                c2pa_signals += 1
+    checks["c2pa_metadata"] = {
+        "status": "PRESENT" if c2pa_signals > 0 else "MISSING",
+        "detail": "%d image(s) with C2PA content credentials" % c2pa_signals if c2pa_signals > 0 else "No C2PA content credentials detected",
+    }
+    
+    # Score: count how many disclosure signals are present
+    present_count = sum(1 for c in checks.values() if c["status"] == "PRESENT")
+    total_checks = len(checks)
+    
+    if total_checks == 0:
+        compliance_score = 0
+    else:
+        compliance_score = round(present_count / total_checks * 100)
+    
+    # Higher disclosure = more transparent = lower risk
+    # Inverted: a site that discloses AI content is more trustworthy
+    risk_from_disclosure = max(0, 20 - (compliance_score / 5)) if compliance_score > 0 else 5
+    
+    return {
+        "score": risk_from_disclosure,
+        "compliance_rate": compliance_score,
+        "checks": checks,
+        "note": "%d of %d disclosure signals present" % (present_count, total_checks),
+    }
+
+
+# ── Phase 4B: Trust Badge System ──
+
+
+def generate_trust_badge_data(ai_score, site_url, combined_score=None):
+    """
+    Generate data for a 'Verified Human Content' badge.
+    
+    The badge is a JWT-signed embed snippet that sites can display.
+    This function generates the data payload — the signing happens
+    at the API layer (Phase 4C).
+    
+    Args:
+        ai_score: AI content detection score (0-100, lower = better)
+        site_url: The site URL being verified
+        combined_score: Optional SiteOracle combined score
+    
+    Returns:
+        dict with badge data
+    """
+    from datetime import datetime, timedelta
+    
+    # Determine badge grade based on AI score
+    if ai_score is None:
+        grade = "PENDING"
+        label = "Awaiting Scan"
+        color = "#64748b"
+    elif ai_score < 20:
+        grade = "A"
+        label = "Verified Human Content"
+        color = "#22c55e"
+    elif ai_score < 40:
+        grade = "B"
+        label = "Likely Human Content"
+        color = "#16a34a"
+    elif ai_score < 60:
+        grade = "C"
+        label = "Mixed Content"
+        color = "#f59e0b"
+    elif ai_score < 80:
+        grade = "D"
+        label = "Likely AI Content"
+        color = "#ea580c"
+    else:
+        grade = "F"
+        label = "AI Generated Content"
+        color = "#ef4444"
+    
+    return {
+        "site": site_url.replace("https://", "").replace("http://", "").rstrip("/"),
+        "ai_score": ai_score,
+        "combined_score": combined_score,
+        "grade": grade,
+        "label": label,
+        "color": color,
+        "issued": datetime.utcnow().isoformat() + "Z",
+        "expires": (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z",
+        "badge_html": _generate_badge_html(grade, label, color, site_url),
+        "embed_script": _generate_embed_script(site_url),
+    }
+
+
+def _generate_badge_html(grade, label, color, site_url):
+    """Generate an inline SVG badge that sites can embed directly."""
+    clean = site_url.replace("https://", "").replace("http://", "").rstrip("/")[:30]
+    return """
+<div style="display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:8px;border:1px solid %(color)s;background:%(color)s10;font-family:system-ui,sans-serif;">
+    <span style="font-size:18px;">🛡️</span>
+    <div>
+        <div style="font-size:13px;font-weight:700;color:%(color)s;">%(label)s</div>
+        <div style="font-size:11px;color:#94a3b8;">%(clean)s — Grade %(grade)s</div>
+    </div>
+    <a href="https://siteoracle-seo-tool-production.up.railway.app/?result=%(clean)s" target="_blank" style="font-size:11px;color:#6366f1;text-decoration:none;font-weight:600;">Verify →</a>
+</div>
+""" % {"color": color, "label": label, "grade": grade, "clean": clean}
+
+
+def _generate_embed_script(site_url):
+    """Generate the embed script that site owners put on their site."""
+    clean = site_url.replace("https://", "").replace("http://", "").rstrip("/")
+    return """
+<!-- SiteOracle Trust Badge -->
+<script src="https://siteoracle-seo-tool-production.up.railway.app/api/v1/badge/verify.js?site=%(site)s"></script>
+<link rel="stylesheet" href="https://siteoracle-seo-tool-production.up.railway.app/api/v1/badge/verify.css">
+<div id="siteoracle-badge" data-site="%(site)s"></div>
+<!-- End SiteOracle Trust Badge -->
+""" % {"site": clean}
 
 
 def _style_vector(text):
