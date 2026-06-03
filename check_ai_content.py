@@ -346,14 +346,21 @@ def check_meta_tags(html):
     return result
 
 
-def check_ai_content(pages, html=None, robots_content=None):
+def check_ai_content(pages, html=None, robots_content=None, sitemap_content=None):
     """
     Main entry point — analyzes crawled pages for AI content detection.
+    
+    Includes:
+    - Phase 1: Pattern-based text analysis + robots.txt + meta tags
+    - Phase 2A: Cross-page consistency check
+    - Phase 2B: Content velocity signal (via sitemap)
+    - Phase 2C: Author entity validation
     
     Args:
         pages: list of parsed page dicts from crawler.py
         html: raw HTML of the home page (for meta tag checks)
         robots_content: raw robots.txt content
+        sitemap_content: raw sitemap XML content
     
     Returns:
         dict with AI content detection results
@@ -386,9 +393,28 @@ def check_ai_content(pages, html=None, robots_content=None):
     if meta_results.get("noai_robots"):
         meta_risk += 5
     
-    # Final weighted score (0-100 scale, mapped to AI risk)
+    # ── Phase 2A: Cross-Page Consistency ──
+    consistency_results = check_cross_page_consistency(pages)
+    consistency_score = consistency_results.get("score", 0)
+    
+    # ── Phase 2B: Content Velocity ──
+    velocity_results = check_content_velocity(sitemap_content) if sitemap_content else {"score": 0, "note": "No sitemap available"}
+    velocity_score = velocity_results.get("score", 0)
+    
+    # ── Phase 2C: Author Entity Validation ──
+    author_results = check_author_entities(pages)
+    author_score = author_results.get("score", 0)
+    
+    # Final weighted score (0-100 scale)
     if text_score is not None:
-        final_score = min(100, max(0, round(text_score * 0.70 + robots_risk + meta_risk)))
+        final_score = min(100, max(0, round(
+            text_score * 0.50 +       # Phase 1: text signals (50%)
+            robots_risk +              # Phase 1: robots.txt
+            consistency_score * 0.6 +  # Phase 2A: cross-page (24% weight)
+            velocity_score * 0.4 +     # Phase 2B: velocity (14% weight)
+            author_score * 0.5 +       # Phase 2C: authors (7.5% weight)
+            meta_risk                  # Phase 1: meta tags
+        )))
     else:
         final_score = None
     
@@ -426,6 +452,35 @@ def check_ai_content(pages, html=None, robots_content=None):
     if robots_results["has_robots_txt"] and not robots_results["blocked_bots"]:
         passes.append("robots.txt does not block AI crawlers — good transparency signal")
     
+    # Phase 2 issues/passes
+    if consistency_results.get("score", 0) >= 30:
+        issues.append({
+            "check": "Cross-Page Style Consistency",
+            "detail": consistency_results.get("note", "Writing style is suspiciously uniform across pages"),
+            "severity": "warning",
+        })
+    elif consistency_results.get("score", 0) >= 15:
+        issues.append({
+            "check": "Cross-Page Style Consistency",
+            "detail": consistency_results.get("note", "Writing style is relatively uniform"),
+            "severity": "info",
+        })
+    
+    if velocity_results.get("flags"):
+        for flag in velocity_results.get("flags", [])[:2]:
+            issues.append({
+                "check": "Publishing Velocity",
+                "detail": flag,
+                "severity": "warning",
+            })
+    
+    if author_results.get("score", 0) >= 10:
+        issues.append({
+            "check": "Author Transparency",
+            "detail": author_results.get("note", "Authors are not verifiable"),
+            "severity": "info",
+        })
+    
     return {
         "score": final_score,
         "text_analysis": text_results,
@@ -433,6 +488,9 @@ def check_ai_content(pages, html=None, robots_content=None):
         "meta_analysis": meta_results,
         "issues": issues,
         "passes": passes,
+        "consistency": consistency_results,
+        "velocity": velocity_results,
+        "authors": author_results,
         "dimensions": {
             "ai_content_detection": {
                 "score": final_score or 0,
@@ -462,84 +520,422 @@ def _get_grade(score):
         return "F"
 
 
-# ── CLI test ──
-if __name__ == "__main__":
-    import sys
+# ── Phase 2A: Cross-Page Consistency Check ─────────────────
+
+
+def _style_vector(text):
+    """
+    Extract a style fingerprint vector from text.
+    Vectors from the same human writer will vary naturally.
+    AI-generated text across pages will be suspiciously uniform.
+    """
+    words = text.split()
+    if len(words) < 50:
+        return None
+
+    sentences = re.split(r'[.!?]+', text)
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
+
+    if len(sentences) < 3:
+        return None
+
+    sent_lengths = [len(s.split()) for s in sentences]
+    para_breaks = text.count('\n\n')
+
+    return {
+        "avg_sentence_len": sum(sent_lengths) / len(sent_lengths),
+        "sentence_len_std": math.sqrt(sum((l - sum(sent_lengths)/len(sent_lengths))**2 for l in sent_lengths) / len(sent_lengths)),
+        "type_token_ratio": len(set(w.lower() for w in words)) / len(words),
+        "punctuation_ratio": sum(1 for c in text if c in '.,;:!?') / len(words),
+        "avg_word_len": sum(len(w) for w in words) / len(words),
+        "para_density": para_breaks / len(words) * 100 if para_breaks > 0 else 0,
+    }
+
+
+def _vector_similarity(v1, v2):
+    """Compare two style vectors. Returns similarity 0-1 (1 = identical)."""
+    if not v1 or not v2:
+        return None
+
+    # Normalized euclidean similarity across all metrics
+    keys = [k for k in v1 if k in v2 and k != "sentence_len_std"]
+    if not keys:
+        return None
+
+    diffs = []
+    for k in keys:
+        a, b = v1[k], v2[k]
+        if a == 0 and b == 0:
+            diffs.append(0)
+        else:
+            # Normalize difference relative to magnitude
+            denom = max(abs(a), abs(b), 0.01)
+            diffs.append(abs(a - b) / denom)
+
+    # Convert to similarity (0.5 = moderate threshold)
+    avg_diff = sum(diffs) / len(diffs)
+    similarity = max(0, min(1, 1 - avg_diff))
+    return similarity
+
+
+def check_cross_page_consistency(pages):
+    """
+    Compare style vectors across multiple pages on the same site.
     
-    if len(sys.argv) > 1 and sys.argv[1] == "--test":
-        # Run self-test with known AI text
-        ai_text = """
-        In today's digital landscape, it is important to note that artificial intelligence
-        has revolutionized the way we approach content creation. Furthermore, the integration
-        of machine learning algorithms has enabled unprecedented levels of automation and efficiency.
-        
-        In conclusion, it is crucial to understand that the landscape of modern technology
-        is ever-evolving. As we navigate this complex terrain, we must remain mindful of
-        the importance of responsible AI implementation.
-        
-        Additionally, it is worth noting that a wide range of applications have emerged
-        across various industries. From healthcare to finance, the realm of AI continues
-        to expand at a remarkable pace. Moreover, the role of data-driven decision making
-        has become increasingly significant.
-        
-        When it comes to content generation, AI-powered tools have demonstrated remarkable
-        capabilities. This article will explore the key considerations for leveraging these
-        technologies effectively. It is essential to understand both the opportunities and
-        challenges that lie ahead.
-        
-        Furthermore, research has shown that AI-generated content can achieve comparable
-        quality to human-written text in many contexts. However, it is imperative to maintain
-        human oversight and editorial review. By leveraging AI responsibly, organizations can
-        enhance productivity while maintaining quality standards.
-        """
-        
-        result = check_text_signals(ai_text)
-        print("=== AI Text Test ===")
-        print(f"Score: {result['score']}/100 ({result['confidence']} confidence)")
-        print(f"Signals:")
-        for name, sig in result.get("signals", {}).items():
-            print(f"  {name}: {sig['score']} — {sig['detail']}")
-        
-        # Test with known human text
-        human_text = """
-        My grandmother taught me to bake bread when I was seven years old. I remember standing
-        on a wooden stool in her tiny kitchen, flour dusting my nose, watching her work the
-        dough with those gnarled hands that had done it a thousand times before.
-        
-        "Feel it," she'd say, pressing my small palm against the warm, elastic mass. "The dough
-        tells you when it's ready." I never understood what she meant until years later, long
-        after she'd gone, when I found myself alone in my own kitchen at 2 AM, my hands
-        covered in flour, finally feeling what she meant.
-        
-        The secret, I learned, wasn't in the recipe. It was in paying attention. To the way
-        the yeast smelled when it activated. To the sound the crust made when you tapped it.
-        To the silence at 4 AM when the first loaf came out of the oven, steam rising,
-        filling the apartment with a smell that could wake the dead.
-        
-        My friends think I'm crazy for baking bread at odd hours. They order from the bakery
-        down the street and call it a day. But they don't understand — it's not really about
-        the bread. It's about those hands, that kitchen, and a seven-year-old girl who learned
-        that some things can't be rushed.
-        """
-        
-        result2 = check_text_signals(human_text)
-        print(f"\n=== Human Text Test ===")
-        print(f"Score: {result2['score']}/100 ({result2['confidence']} confidence)")
-        print(f"Signals:")
-        for name, sig in result2.get("signals", {}).items():
-            print(f"  {name}: {sig['score']} — {sig['detail']}")
-        
-        # Test robots.txt
-        robots = """
-User-agent: GPTBot
-Disallow: /
+    If all pages have nearly identical writing style, it's suspicious.
+    Human sites show natural variation between page types (about vs blog).
+    
+    Returns dict with consistency analysis.
+    """
+    if not pages or len(pages) < 2:
+        return {
+            "score": 0,
+            "pages_analyzed": len(pages) if pages else 0,
+            "note": "Need 2+ pages to compare consistency",
+            "vectors": {},
+        }
 
-User-agent: CCBot
-Disallow: /
+    vectors = {}
+    for page in pages:
+        text = " ".join(page.get("paragraphs", []))
+        vec = _style_vector(text)
+        if vec:
+            vectors[page.get("url", "unknown")[:60]] = vec
 
-User-agent: *
-Allow: /
-"""
-        robots_result = check_robots_txt(robots)
-        print(f"\n=== Robots.txt Test ===")
-        print(f"Blocked bots: {robots_result['blocked_bots']}")
+    if len(vectors) < 2:
+        return {
+            "score": 0,
+            "pages_analyzed": len(vectors),
+            "note": "Insufficient text on pages for style comparison",
+            "vectors": {},
+        }
+
+    # Compare all pairs
+    similarities = []
+    urls = list(vectors.keys())
+    for i in range(len(urls)):
+        for j in range(i + 1, len(urls)):
+            sim = _vector_similarity(vectors[urls[i]], vectors[urls[j]])
+            if sim is not None:
+                similarities.append({
+                    "pages": (urls[i][:40], urls[j][:40]),
+                    "similarity": round(sim, 3),
+                })
+
+    if not similarities:
+        return {"score": 0, "note": "Could not compare vectors", "vectors": vectors}
+
+    avg_similarity = sum(s["similarity"] for s in similarities) / len(similarities)
+
+    # Score: higher similarity = more suspicious
+    if avg_similarity > 0.92:
+        consistency_score = 40
+        note = "Suspiciously consistent style across all pages — strong AI indicator"
+    elif avg_similarity > 0.85:
+        consistency_score = 20
+        note = "Relatively uniform style across pages — possible AI pattern"
+    elif avg_similarity > 0.75:
+        consistency_score = 10
+        note = "Natural variation in writing style across pages"
+    else:
+        consistency_score = 5
+        note = "Good stylistic variation between pages — human-like"
+
+    return {
+        "score": consistency_score,
+        "avg_similarity": round(avg_similarity, 3),
+        "pages_analyzed": len(vectors),
+        "pairs_compared": len(similarities),
+        "top_similarities": sorted(similarities, key=lambda x: x["similarity"], reverse=True)[:3],
+        "note": note,
+        "vectors": {k: {sk: round(sv, 3) for sk, sv in v.items()} for k, v in vectors.items()},
+    }
+
+
+# ── Phase 2B: Content Velocity Signal ──
+
+
+def check_content_velocity(sitemap_content):
+    """
+    Analyze sitemap timestamps for AI publishing patterns.
+    
+    Red flags:
+    - Superhuman publishing speed (50+ posts/month for a small site)
+    - Batched publishing (multiple posts same hour/minute)
+    - Unnatural regularity (posts every X hours exactly)
+    
+    Args:
+        sitemap_content: Raw sitemap XML content, or None
+    
+    Returns:
+        dict with velocity analysis
+    """
+    if not sitemap_content:
+        return {
+            "score": 0,
+            "has_sitemap": False,
+            "note": "No sitemap found — cannot analyze publishing velocity",
+        }
+
+    # Extract lastmod dates
+    dates = re.findall(r'<lastmod[^>]*>(.*?)</lastmod>', sitemap_content, re.IGNORECASE)
+    urls_in_sitemap = len(re.findall(r'<url[ >]', sitemap_content, re.IGNORECASE))
+
+    if not dates:
+        # Try <lastmod> without explicit tags
+        dates = re.findall(r'(\d{4}-\d{2}-\d{2})', sitemap_content)
+
+    if not dates or len(dates) < 3:
+        return {
+            "score": 0,
+            "has_sitemap": True,
+            "urls_in_sitemap": urls_in_sitemap or len(re.findall(r'<loc[^>]*>(.*?)</loc>', sitemap_content)),
+            "note": "Not enough timestamp data for velocity analysis",
+        }
+
+    try:
+        from datetime import datetime
+        parsed_dates = []
+        for d in dates:
+            d = d.strip()
+            for fmt in ["%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"]:
+                try:
+                    parsed_dates.append(datetime.strptime(d[:19], fmt))
+                    break
+                except ValueError:
+                    continue
+    except Exception:
+        return {"score": 0, "has_sitemap": True, "note": "Could not parse timestamps"}
+
+    if len(parsed_dates) < 3:
+        return {"score": 0, "has_sitemap": True, "note": "Not enough valid dates"}
+
+    parsed_dates.sort()
+
+    # 1. Velocity: posts per 30 days
+    total_days = (parsed_dates[-1] - parsed_dates[0]).days or 1
+    posts_per_30 = len(parsed_dates) / total_days * 30
+
+    velocity_score = 0
+    if posts_per_30 > 50:
+        velocity_score = 25
+    elif posts_per_30 > 30:
+        velocity_score = 15
+    elif posts_per_30 > 15:
+        velocity_score = 8
+    else:
+        velocity_score = 2
+
+    # 2. Batch publishing: same-hour posts
+    from collections import Counter
+    hour_buckets = Counter()
+    for d in parsed_dates:
+        key = d.strftime("%Y-%m-%d %H:00")
+        hour_buckets[key] += 1
+
+    max_same_hour = max(hour_buckets.values()) if hour_buckets else 0
+    batch_score = 0
+    if max_same_hour >= 10:
+        batch_score = 15
+    elif max_same_hour >= 5:
+        batch_score = 8
+    elif max_same_hour >= 3:
+        batch_score = 3
+
+    # 3. Regularity: check for suspiciously even spacing
+    if len(parsed_dates) >= 5:
+        gaps = [(parsed_dates[i+1] - parsed_dates[i]).total_seconds() for i in range(len(parsed_dates)-1)]
+        avg_gap = sum(gaps) / len(gaps)
+        gap_std = math.sqrt(sum((g - avg_gap)**2 for g in gaps) / len(gaps))
+
+        regularity_score = 0
+        if gap_std < 300:  # Less than 5 min std dev = bot
+            regularity_score = 10
+        elif gap_std < 1800:  # Less than 30 min std dev = suspicious
+            regularity_score = 5
+    else:
+        regularity_score = 0
+        gap_std = None
+
+    total_velocity = min(35, velocity_score + batch_score + regularity_score)
+
+    flags = []
+    if velocity_score >= 15:
+        flags.append("High publishing velocity (%.0f posts/30 days)" % posts_per_30)
+    if batch_score >= 8:
+        flags.append("Batch publishing detected (%d posts in same hour)" % max_same_hour)
+    if regularity_score >= 5:
+        flags.append("Suspiciously regular publishing schedule")
+
+    return {
+        "score": total_velocity,
+        "has_sitemap": True,
+        "urls_in_sitemap": urls_in_sitemap or len(parsed_dates),
+        "posts_per_30_days": round(posts_per_30, 1),
+        "max_same_hour_posts": max_same_hour,
+        "gap_std_seconds": round(gap_std, 1) if gap_std is not None else None,
+        "flags": flags,
+        "note": " | ".join(flags) if flags else "Normal publishing cadence",
+    }
+
+
+# ── Phase 2C: Author Entity Validation ──
+
+
+def check_author_entities(pages):
+    """
+    Check if authors listed on the site have verifiable digital identities.
+    
+    Extracts author names from:
+    - schema.org/author JSON-LD
+    - <meta name="author"> tags
+    - Byline patterns in article text
+    
+    Then attempts verification via simple heuristics.
+    Full Knowledge Graph API integration requires API key (Phase 3).
+    """
+    if not pages:
+        return {"score": 0, "authors_found": 0, "verified_authors": 0, "note": "No pages to analyze"}
+
+    authors_found = set()
+
+    for page in pages:
+        html_snippet = str(page.get("paragraphs", []))
+        url = page.get("url", "")
+
+        # Check author meta tags
+        meta_author = re.search(r'<meta[^>]*name=["\']author["\'][^>]*content=["\']([^"\']*)["\']', html_snippet, re.IGNORECASE)
+        if meta_author:
+            name = meta_author.group(1).strip()
+            if name and name.lower() not in ("", "admin", "staff", "editor", "author"):
+                authors_found.add(name)
+
+        # Check byline patterns
+        for p in page.get("paragraphs", []):
+            byline = re.search(r'^(?:By|Written by|Author:)\s+(.+?)(?:\.|$)', p.strip(), re.IGNORECASE)
+            if byline:
+                name = byline.group(1).strip()
+                if name and len(name) > 3 and name.lower() not in ("admin", "staff"):
+                    authors_found.add(name)
+
+        # Check JSON-LD author
+        jsonld = re.search(r'"author"\s*:\s*{"@type"\s*:\s*"Person"[^}]*"name"\s*:\s*"([^"]+)"', html_snippet, re.IGNORECASE)
+        if jsonld:
+            authors_found.add(jsonld.group(1).strip())
+
+    # For now, do lightweight verification:
+    # - If no authors found = red flag
+    # - If only generic names = red flag
+    # - Real names with first+last = neutral
+    generic_names = {"admin", "staff", "editor", "author", "contributor", "writer", "team", "guest"}
+
+    verified = 0
+    unverified = 0
+    for author in authors_found:
+        if author.lower() in generic_names:
+            unverified += 1
+        elif len(author.split()) >= 2:  # Has first and last name
+            verified += 1
+        else:
+            unverified += 1
+
+    total = len(authors_found)
+
+    if total == 0:
+        score = 15
+        note = "No authors found on any page — possible ghost authorship"
+    elif verified == 0 and unverified > 0:
+        score = 10
+        note = "Authors found but no verifiable identities — all are generic or single-name"
+    elif verified / total < 0.5:
+        score = 5
+        note = "Some authors have real names, but many appear generic"
+    else:
+        score = 2
+        note = "Authors with real names found — good transparency signal"
+
+    return {
+        "score": score,
+        "authors_found": list(authors_found),
+        "verified_authors": verified,
+        "unverified_authors": unverified,
+        "note": note,
+        "author_count": total,
+    }
+
+
+if __name__ == "__main__":
+    # Run self-test with known AI text
+    ai_text = """
+    In today's digital landscape, it is important to note that artificial intelligence
+    has revolutionized the way we approach content creation. Furthermore, the integration
+    of machine learning algorithms has enabled unprecedented levels of automation and efficiency.
+    
+    In conclusion, it is crucial to understand that the landscape of modern technology
+    is ever-evolving. As we navigate this complex terrain, we must remain mindful of
+    the importance of responsible AI implementation.
+    
+    Additionally, it is worth noting that a wide range of applications have emerged
+    across various industries. From healthcare to finance, the realm of AI continues
+    to expand at a remarkable pace. Moreover, the role of data-driven decision making
+    has become increasingly significant.
+    
+    When it comes to content generation, AI-powered tools have demonstrated remarkable
+    capabilities. This article will explore the key considerations for leveraging these
+    technologies effectively. It is essential to understand both the opportunities and
+    challenges that lie ahead.
+    
+    Furthermore, research has shown that AI-generated content can achieve comparable
+    quality to human-written text in many contexts. However, it is imperative to maintain
+    human oversight and editorial review. By leveraging AI responsibly, organizations can
+    enhance productivity while maintaining quality standards.
+    """
+    
+    result = check_text_signals(ai_text)
+    print("=== AI Text Test ===")
+    print(f"Score: {result['score']}/100 ({result['confidence']} confidence)")
+    for name, sig in result.get("signals", {}).items():
+        print(f"  {name}: {sig['score']} — {sig['detail']}")
+    
+    human_text = """
+    My grandmother taught me to bake bread when I was seven. I remember standing
+    on a wooden stool in her tiny kitchen, flour dusting my nose, watching her work the
+    dough with those gnarled hands that had done it a thousand times before.
+    
+    "Feel it," she'd say, pressing my small palm against the warm, elastic mass.
+    """
+    result2 = check_text_signals(human_text)
+    print(f"\n=== Human Text Test ===")
+    print(f"Score: {result2['score']}/100 ({result2['confidence']} confidence)")
+    for name, sig in result2.get("signals", {}).items():
+        print(f"  {name}: {sig['score']} — {sig['detail']}")
+    
+    # Test Phase 2 features
+    print("\n=== Phase 2 Tests ===")
+    
+    # Cross-page consistency
+    mock_pages = [
+        {"url": "https://example.com/about", "paragraphs": ["We are a leading company in the industry. It is important to note that our mission focuses on customer satisfaction. Furthermore, we believe in innovation and excellence. Additionally, our team is dedicated to providing the best service possible."]},
+        {"url": "https://example.com/blog/post1", "paragraphs": ["In today's digital world, it is crucial to stay ahead of the curve. This article will explore the key trends shaping our industry. Moreover, we will dive into the strategies that drive success."]},
+    ]
+    cc = check_cross_page_consistency(mock_pages)
+    print(f"Cross-page consistency: {cc['score']}/40 — {cc['note']}")
+    
+    # Content velocity
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    sitemap_xml = '<?xml version="1.0"?><urlset>'
+    for i in range(20):
+        ts = now - timedelta(hours=i*2)
+        sitemap_xml += f'<url><loc>https://ex.com/p{i}</loc><lastmod>{ts.strftime("%Y-%m-%dT%H:%M:%S+00:00")}</lastmod></url>'
+    for i in range(5):
+        ts = now - timedelta(hours=1, minutes=i*2)
+        sitemap_xml += f'<url><loc>https://ex.com/b{i}</loc><lastmod>{ts.strftime("%Y-%m-%dT%H:%M:%S+00:00")}</lastmod></url>'
+    sitemap_xml += '</urlset>'
+    cv = check_content_velocity(sitemap_xml)
+    print(f"Content velocity: {cv['score']}/35 — flags: {cv.get('flags', [])}")
+    
+    # Author entities
+    ap = [{"url": "https://ex.com", "paragraphs": ['<meta name="author" content="John Smith">']}]
+    ae = check_author_entities(ap)
+    print(f"Author entities: {ae['score']}/15 — {ae['note']}")

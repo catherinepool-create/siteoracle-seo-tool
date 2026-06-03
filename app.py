@@ -810,7 +810,17 @@ with tab_analyze:
                     robots_content = r.text
             except Exception:
                 pass
-            ai_content = check_ai_content(pages, html=homepage_html, robots_content=robots_content)
+            # Fetch sitemap for velocity analysis
+            sitemap_content = None
+            for sitemap_path in ["/sitemap.xml", "/sitemap_index.xml", "/sitemap/sitemap.xml"]:
+                try:
+                    r = requests.get(url.rstrip("/") + sitemap_path, headers={"User-Agent": "SiteOracle/1.0"}, timeout=5)
+                    if r.status_code == 200 and "xml" in r.headers.get("Content-Type", ""):
+                        sitemap_content = r.text
+                        break
+                except Exception:
+                    continue
+            ai_content = check_ai_content(pages, html=homepage_html, robots_content=robots_content, sitemap_content=sitemap_content)
             status.update(label="✅ AI Content Detection done", state="complete")
 
         # ── Visual Audit (auto-screenshot, Pro only) ──
