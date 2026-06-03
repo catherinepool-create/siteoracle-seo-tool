@@ -405,15 +405,31 @@ def check_ai_content(pages, html=None, robots_content=None, sitemap_content=None
     author_results = check_author_entities(pages)
     author_score = author_results.get("score", 0)
     
+    # ── Phase 3A: ML Classifier ──
+    ml_result = check_ml_classifier(all_text)
+    ml_score = ml_result.get("score") if ml_result else None
+    
+    # ── Phase 3B: Image AI Detection ──
+    image_result = check_image_ai_detection(pages)
+    image_score = image_result.get("score", 0)
+    
+    # ── Phase 3C: Platform Flags ──
+    platform_flags = []
+    
     # Final weighted score (0-100 scale)
     if text_score is not None:
+        ml_weight = 15 if ml_score is not None else 0
+        pattern_weight = 50 - ml_weight  # Shift weight to patterns if ML not available
+        
         final_score = min(100, max(0, round(
-            text_score * 0.50 +       # Phase 1: text signals (50%)
-            robots_risk +              # Phase 1: robots.txt
-            consistency_score * 0.6 +  # Phase 2A: cross-page (24% weight)
-            velocity_score * 0.4 +     # Phase 2B: velocity (14% weight)
-            author_score * 0.5 +       # Phase 2C: authors (7.5% weight)
-            meta_risk                  # Phase 1: meta tags
+            text_score * (pattern_weight / 100) +  # Phase 1: text signals
+            (ml_score or 0) * (ml_weight / 100) +  # Phase 3A: ML classifier
+            robots_risk +                            # Phase 1: robots.txt
+            consistency_score * 0.6 +               # Phase 2A: cross-page
+            velocity_score * 0.4 +                  # Phase 2B: velocity
+            author_score * 0.5 +                    # Phase 2C: authors
+            image_score * 0.3 +                     # Phase 3B: images
+            meta_risk                                # Phase 1: meta tags
         )))
     else:
         final_score = None
@@ -481,6 +497,26 @@ def check_ai_content(pages, html=None, robots_content=None, sitemap_content=None
             "severity": "info",
         })
     
+    # Calculate platform flags based on final score
+    platform_flags = check_platform_flags(final_score)
+    
+    # Add image issue if flagged
+    if image_result.get("flags"):
+        for flag in image_result.get("flags", [])[:1]:
+            issues.append({
+                "check": "Image AI Detection",
+                "detail": flag,
+                "severity": "info",
+            })
+    
+    # Add platform flags as issues
+    for pf in platform_flags:
+        issues.append({
+            "check": "%s AI Policy Risk" % pf["platform"].title(),
+            "detail": pf["message"],
+            "severity": pf["severity"],
+        })
+    
     return {
         "score": final_score,
         "text_analysis": text_results,
@@ -491,6 +527,9 @@ def check_ai_content(pages, html=None, robots_content=None, sitemap_content=None
         "consistency": consistency_results,
         "velocity": velocity_results,
         "authors": author_results,
+        "ml_classifier": ml_result,
+        "image_detection": image_result,
+        "platform_flags": platform_flags,
         "dimensions": {
             "ai_content_detection": {
                 "score": final_score or 0,
@@ -520,7 +559,200 @@ def _get_grade(score):
         return "F"
 
 
-# ── Phase 2A: Cross-Page Consistency Check ─────────────────
+# ── Phase 3A: ML Classifier (optional — requires transformers) ──
+
+
+_ML_CLASSIFIER = None
+_ML_TOKENIZER = None
+_ML_LOADED = False
+
+try:
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    import torch
+    _ML_MODEL_NAME = "Hello-SimpleAI/chatgpt-detector-roberta"
+    _ML_LOADED = True
+except ImportError:
+    pass
+
+
+def _load_ml_classifier():
+    """Lazy-load the ML classifier model on first use."""
+    global _ML_CLASSIFIER, _ML_TOKENIZER
+    if not _ML_LOADED:
+        return None
+    if _ML_CLASSIFIER is None:
+        try:
+            _ML_TOKENIZER = AutoTokenizer.from_pretrained(_ML_MODEL_NAME)
+            _ML_CLASSIFIER = AutoModelForSequenceClassification.from_pretrained(_ML_MODEL_NAME)
+        except Exception:
+            return None
+    return _ML_CLASSIFIER
+
+
+def check_ml_classifier(text):
+    """
+    Use a fine-tuned RoBERTa model to classify text as AI or human.
+    
+    Returns dict with classification result, or None if model unavailable.
+    Falls back gracefully — the rest of SiteOracle works without it.
+    """
+    model = _load_ml_classifier()
+    if model is None:
+        return None
+    
+    if not text or len(text.strip()) < 50:
+        return {"score": None, "note": "Insufficient text for classification"}
+    
+    try:
+        # Split long text into chunks of 512 tokens
+        max_len = 512
+        words = text.split()
+        chunks = []
+        for i in range(0, len(words), max_len):
+            chunk = " ".join(words[i:i+max_len])
+            if len(chunk.split()) >= 20:
+                chunks.append(chunk)
+        
+        if not chunks:
+            return {"score": None, "note": "Text too short after chunking"}
+        
+        scores = []
+        for chunk in chunks[:3]:  # Max 3 chunks
+            inputs = _ML_TOKENIZER(chunk, return_tensors="pt", truncation=True, max_length=512)
+            with torch.no_grad():
+                outputs = model(**inputs)
+                probs = torch.nn.functional.softmax(outputs.logits, dim=-1)
+                # Model returns [human_prob, ai_prob] — we want ai_prob
+                ai_prob = probs[0][1].item()
+                scores.append(ai_prob)
+        
+        avg_score = sum(scores) / len(scores) * 100
+        
+        return {
+            "score": round(avg_score, 1),
+            "confidence": "high" if len(chunks) >= 2 else "moderate",
+            "chunks_analyzed": len(chunks),
+            "model": _ML_MODEL_NAME,
+        }
+    except Exception as e:
+        return {"score": None, "note": f"ML classification failed: {e}"}
+
+
+# ── Phase 3B: Image AI Detection (Hive Moderation API optional) ──
+
+
+def check_image_ai_detection(pages, api_key=None):
+    """
+    Check images on pages for AI generation signals.
+    
+    Phase 3B ships with pattern-based image analysis by default.
+    Full Hive Moderation API integration requires an API key.
+    """
+    if not pages:
+        return {"score": 0, "images_analyzed": 0, "ai_images": 0, "note": "No pages to analyze"}
+    
+    image_count = sum(len(p.get("images", [])) for p in pages)
+    images_with_alt = sum(1 for p in pages for i in p.get("images", []) if i.get("alt"))
+    
+    # Pattern-based: check for generic alt text patterns common in AI images
+    generic_alts = 0
+    for page in pages:
+        for img in page.get("images", []):
+            alt = (img.get("alt") or "").lower().strip()
+            if alt in ("", "image", "photo", "picture", "img", "placeholder"):
+                generic_alts += 1
+    
+    if image_count == 0:
+        return {"score": 0, "images_analyzed": 0, "ai_images": 0, "note": "No images found"}
+    
+    # Score based on alt-text quality (a rough proxy for image quality)
+    alt_coverage = images_with_alt / image_count if image_count > 0 else 0
+    
+    risk = 0
+    flags = []
+    if generic_alts > image_count * 0.5:
+        risk += 10
+        flags.append("Low-quality alt text on most images — possible AI generation")
+    if alt_coverage < 0.3:
+        risk += 5
+        flags.append("Most images missing alt text")
+    
+    return {
+        "score": risk,
+        "images_analyzed": image_count,
+        "images_with_alt": images_with_alt,
+        "generic_alt_count": generic_alts,
+        "flags": flags,
+        "note": " | ".join(flags) if flags else "Image metadata appears normal",
+        "hive_api_available": api_key is not None,
+    }
+
+
+# ── Phase 3C: Platform-Specific Risk Flags ──
+
+
+# Platform rules for AI content thresholds
+PLATFORM_RULES = {
+    "google": {
+        "threshold_warn": 45,
+        "threshold_fail": 70,
+        "message": "Risk of Google Helpful Content penalty. Pages scoring above 70%% AI probability may face ranking demotion.",
+        "policy_url": "https://developers.google.com/search/docs/essentials",
+    },
+    "etsy": {
+        "threshold_warn": 30,
+        "threshold_fail": 50,
+        "message": "Etsy prohibits AI-generated listing descriptions. This score may violate seller policy.",
+        "policy_url": "https://www.etsy.com/legal/sellers",
+    },
+    "amazon": {
+        "threshold_warn": 50,
+        "threshold_fail": 75,
+        "message": "Amazon product listings with AI-generated content risk suppression or removal.",
+        "policy_url": "https://sellercentral.amazon.com/help/hub/reference/G200141480",
+    },
+    "linkedin": {
+        "threshold_warn": 55,
+        "threshold_fail": 80,
+        "message": "LinkedIn flags AI-generated content in posts and articles — may restrict reach.",
+        "policy_url": "https://www.linkedin.com/help/linkedin/answer/a521996",
+    },
+}
+
+
+def check_platform_flags(ai_score):
+    """
+    Generate per-platform risk flags based on the AI content score.
+    
+    Args:
+        ai_score: The AI content detection score (0-100)
+    
+    Returns:
+        list of platform flag dicts
+    """
+    if ai_score is None:
+        return []
+    
+    flags = []
+    for platform, rules in PLATFORM_RULES.items():
+        if ai_score >= rules["threshold_fail"]:
+            flags.append({
+                "platform": platform,
+                "status": "fail",
+                "severity": "critical",
+                "message": rules["message"],
+                "policy_url": rules["policy_url"],
+            })
+        elif ai_score >= rules["threshold_warn"]:
+            flags.append({
+                "platform": platform,
+                "status": "warn",
+                "severity": "warning",
+                "message": rules["message"],
+                "policy_url": rules["policy_url"],
+            })
+    
+    return flags
 
 
 def _style_vector(text):
