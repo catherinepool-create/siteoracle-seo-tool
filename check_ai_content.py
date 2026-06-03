@@ -366,7 +366,11 @@ def check_ai_content(pages, html=None, robots_content=None, sitemap_content=None
         dict with AI content detection results
     """
     # 1. Text signal analysis (on all pages)
-    all_text = " ".join(p.get("paragraphs", []) for p in pages)
+    all_text = " ".join(
+        " ".join(p.get("paragraphs", [])) if isinstance(p.get("paragraphs", []), list)
+        else str(p.get("paragraphs", ""))
+        for p in pages
+    )
     
     text_results = check_text_signals(all_text)
     
@@ -1008,7 +1012,8 @@ def check_cross_page_consistency(pages):
 
     vectors = {}
     for page in pages:
-        text = " ".join(page.get("paragraphs", []))
+        paras = page.get("paragraphs", [])
+        text = " ".join(paras) if isinstance(paras, list) else str(paras)
         vec = _style_vector(text)
         if vec:
             vectors[page.get("url", "unknown")[:60]] = vec
@@ -1211,7 +1216,8 @@ def check_author_entities(pages):
     authors_found = set()
 
     for page in pages:
-        html_snippet = str(page.get("paragraphs", []))
+        paras = page.get("paragraphs", [])
+        html_snippet = " ".join(paras) if isinstance(paras, list) else str(paras)
         url = page.get("url", "")
 
         # Check author meta tags
