@@ -18,7 +18,7 @@ from comparison import compare_sites, generate_comparison_report
 from monitor import setup_monitor, load_monitors, save_snapshot, get_trend, generate_trend_report
 from auth import render_sidebar_auth, is_pro_or_above, is_agency, get_user_plan, render_upgrade_card, STRIPE_LINK_PRO, STRIPE_LINK_AGENCY
 from ad_generator import generate_ad_script, generate_video_ad, get_available_formats
-from emailer import send_scan_report
+from emailer import send_scan_report, capture_lead, send_drip_now
 from visual_audit import analyse_screenshot_visual
 from screenshot import capture_screenshot
 from check_ai_content import check_ai_content, check_robots_txt
@@ -615,7 +615,25 @@ if not _embedded and not _result_url and not _is_vs_mode:
 
     st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
-# ── Tabs (hidden in result mode or VS mode — shows clean scorecard) ──
+    # ── Newsletter Signup (inline, below hero) ──
+    if not st.session_state.get("newsletter_signed_up"):
+        news1, news2 = st.columns([3, 1])
+        with news1:
+            news_email = st.text_input(
+                "", placeholder="📬 Get the AI Visibility Checklist — 10 checks for ChatGPT/Perplexity/Gemini",
+                key="newsletter_email", label_visibility="collapsed"
+            )
+        with news2:
+            if st.button("Send Me the Checklist →", type="primary", use_container_width=True, key="newsletter_btn"):
+                if news_email and "@" in news_email:
+                    capture_lead(news_email, "inline-newsletter")
+                    send_drip_now(news_email, 0)
+                    st.session_state["newsletter_signed_up"] = True
+                    st.success("✅ Sent! Check your inbox.")
+                else:
+                    st.warning("Enter a valid email address.")
+
+    st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 if _is_vs_mode:
     # VS mode header
     st.markdown(f"""

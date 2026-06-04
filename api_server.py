@@ -11,6 +11,8 @@ import sys
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from emailer import capture_lead, send_drip_now
 import uvicorn
 
 app = FastAPI(title="SiteOracle API")
@@ -103,6 +105,53 @@ async def api_scan(
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+class LeadCapture(BaseModel):
+    email: str
+    source: str = "popup"
+
+
+@app.post("/api/lead-capture")
+async def api_lead_capture(lead: LeadCapture):
+    """Capture a lead email and send drip email #1 immediately."""
+    captured = capture_lead(lead.email, lead.source)
+    if captured:
+        ok = send_drip_now(lead.email, 0)
+        return {
+            "status": "ok",
+            "email": lead.email,
+            "drip_email_1_sent": ok,
+            "message": "Checklist sent! Check your inbox.",
+        }
+    return {"status": "ok", "email": lead.email, "message": "Already subscribed."}
+
+
+@app.get("/api/drip-stats")
+async def api_drip_stats():
+    """Get drip sequence stats (for monitoring)."""
+    from emailer import _load_leads
+    leads = _load_leads()
+    total = len(leads)
+    unsubscribed = sum(1 for l in leads if l.get("unsubscribed"))
+    by_state = {}
+    for l in leads:
+        s = l.get("drip_state", 0)
+        by_state[s] = by_state.get(s, 0) + 1
+    return {
+        "total_leads": total,
+        "unsubscribed": unsubscribed,
+        "active": total - unsubscribed,
+        "by_drip_state": by_state,
+    }
+
+
+@app.post("/api/process-drip")
+async def api_process_drip():
+    """Trigger the drip processor manually."""
+    from emailer import process_drip as _pd
+    result = _pd()
+    return {"status": "ok", "result": result}
 
 
 if __name__ == "__main__":
