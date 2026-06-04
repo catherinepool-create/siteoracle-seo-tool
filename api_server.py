@@ -1,6 +1,6 @@
 """
-SiteOracle unified API server — sits in front of Streamlit.
-Handles /api/* routes directly, proxies everything else to Streamlit.
+SiteOracle API server — runs alongside Streamlit on port 8000.
+Handles /api/* routes for lead capture, scan, drip processing.
 """
 
 import json
@@ -8,13 +8,12 @@ import os
 import sys
 import argparse
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response, HTMLResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from emailer import capture_lead, send_drip_now
 import uvicorn
-import httpx
 
 app = FastAPI(title="SiteOracle API")
 
@@ -25,9 +24,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Streamlit backend URL (set via CLI arg)
-STREAMLIT_URL = "http://127.0.0.1:8501"
 
 
 def run_scan(target_url: str, max_pages: int = 5, biz_name: str | None = None):
@@ -115,31 +111,27 @@ class LeadCapture(BaseModel):
     source: str = "popup"
 
 
-@app.post("/api/lead-capture")
-async def api_lead_capture(lead: LeadCapture):
-    """Capture a lead email and send drip email #1 immediately."""
-    captured = capture_lead(lead.email, lead.source)
-    if captured:
-        ok = send_drip_now(lead.email, 0)
-        return {
-            "status": "ok",
-            "email": lead.email,
-            "drip_email_1_sent": ok,
-            "message": "Checklist sent! Check your inbox.",
-        }
-    return {"status": "ok", "email": lead.email, "message": "Already subscribed."}
-
-
 @app.get("/api/lead-capture")
 async def api_lead_capture_get(email: str = Query(...), source: str = "popup"):
-    """GET variant — simpler for popup forms."""
+    """Capture a lead email (GET variant — for popup form fetch)."""
     if not email or "@" not in email:
         return JSONResponse({"status": "error", "message": "Invalid email"}, status_code=400)
     captured = capture_lead(email, source)
     if captured:
         ok = send_drip_now(email, 0)
-        return {"status": "ok", "email": email, "drip_email_1_sent": ok}
+        return {
+            "status": "ok",
+            "email": email,
+            "drip_email_1_sent": ok,
+            "message": "Checklist sent! Check your inbox.",
+        }
     return {"status": "ok", "email": email, "message": "Already subscribed."}
+
+
+@app.post("/api/lead-capture")
+async def api_lead_capture_post(lead: LeadCapture):
+    """Capture a lead email (POST variant)."""
+    return await api_lead_capture_get(email=lead.email, source=lead.source)
 
 
 @app.get("/api/drip-stats")
@@ -169,42 +161,8 @@ async def api_process_drip():
     return {"status": "ok", "result": result}
 
 
-# ── Catch-all: proxy everything else to Streamlit ──────────────
-
-@app.api_route("/{path:path}", methods=["GET", "POST", "HEAD", "OPTIONS"])
-async def proxy_to_streamlit(request: Request, path: str):
-    """Proxy non-API requests to the Streamlit backend."""
-    target_url = f"{STREAMLIT_URL}/{path}"
-    query = str(request.url.query)
-    if query:
-        target_url += f"?{query}"
-
-    headers = dict(request.headers)
-    headers.pop("host", None)
-
-    try:
-        async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.request(
-                method=request.method,
-                url=target_url,
-                headers=headers,
-                content=await request.body(),
-            )
-            return Response(
-                content=resp.content,
-                status_code=resp.status_code,
-                headers=dict(resp.headers),
-            )
-    except httpx.ConnectError:
-        return HTMLResponse("<h1>503 — Streamlit backend not available</h1>", status_code=503)
-    except Exception as e:
-        return HTMLResponse(f"<h1>502 — Proxy error: {e}</h1>", status_code=502)
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8080)))
-    parser.add_argument("--streamlit-url", default="http://127.0.0.1:8501")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("API_PORT", 8000)))
     args = parser.parse_args()
-    STREAMLIT_URL = args.streamlit_url
     uvicorn.run(app, host="0.0.0.0", port=args.port)

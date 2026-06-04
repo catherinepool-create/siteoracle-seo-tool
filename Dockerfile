@@ -23,9 +23,10 @@ RUN useradd -m -u 1000 siteoracle && chown -R siteoracle:siteoracle /app \
     && chmod +x /app/start.sh
 USER siteoracle
 
-EXPOSE 8080
+EXPOSE 8501
+EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8080/api/health || exit 1
+    CMD curl -f http://localhost:8501/_stcore/health || exit 1
 
 CMD ["/app/start.sh"]
