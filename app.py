@@ -96,9 +96,18 @@ if _API_FORMAT == "json":
         st.json(_api_result)
         st.stop()
 
-# ── Lead Capture Endpoint ──────────────────────────────────────
+# ── Lead Capture + Drip Processing Endpoints ──────────────────
 _LEAD_ACTION = st.query_params.get("action", "")
 _LEAD_EMAIL = st.query_params.get("email", "").strip()
+
+# ?action=process-drip — run the drip processor externally
+if _LEAD_ACTION == "process-drip":
+    from emailer import process_drip as _drip_it
+    _drip_result = _drip_it()
+    st.json(_drip_result)
+    st.stop()
+
+# ?action=lead-capture&email=X — capture a lead from external popup
 if _LEAD_ACTION == "lead-capture" and _LEAD_EMAIL and "@" in _LEAD_EMAIL:
     capture_lead(_LEAD_EMAIL, "popup")
     send_drip_now(_LEAD_EMAIL, 0)
