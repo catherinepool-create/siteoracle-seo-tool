@@ -96,6 +96,15 @@ if _API_FORMAT == "json":
         st.json(_api_result)
         st.stop()
 
+# ── Lead Capture Endpoint ──────────────────────────────────────
+_LEAD_ACTION = st.query_params.get("action", "")
+_LEAD_EMAIL = st.query_params.get("email", "").strip()
+if _LEAD_ACTION == "lead-capture" and _LEAD_EMAIL and "@" in _LEAD_EMAIL:
+    capture_lead(_LEAD_EMAIL, "popup")
+    send_drip_now(_LEAD_EMAIL, 0)
+    st.write("✅ Sent! Check your inbox.")
+    st.stop()
+
 # ── Rate Limiting ──────────────────────────────────────────────
 RATE_LIMIT_FILE = Path("/tmp/siteoracle_ratelimit.json")
 
